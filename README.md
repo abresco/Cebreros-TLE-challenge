@@ -5,7 +5,7 @@ This repository aims to process satellite data for **RFI Identification and Pred
 ## Project Structure
 
 - **data/**: Data files (CSV, TLEs).
-- **core/**: Logic for orbital propagation, azimuth, and elevation calculations.
+- **src/**: Logic for source code.
 - **validation/**: Comparison with real data and metrics.
 - **gui/**: Graphical User Interface (if implemented).
 
