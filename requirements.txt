@@ -1,4 +1,4 @@
 numpy
-pytz
-sgp4
+pandas
 requests
+skyfield

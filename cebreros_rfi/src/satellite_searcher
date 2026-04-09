@@ -52,7 +52,7 @@ times = ts.from_datetimes(times_list)
 # -------------------------------------------------
 # Load multiple TLE files (Celestrak data)
 # -------------------------------------------------
-base_dir = os.path.dirname(_file_)
+base_dir = os.path.dirname(__file__)
 
 tle_files = ["active.tle", "geo.tle", "starlink.tle"]
 satellites = []
