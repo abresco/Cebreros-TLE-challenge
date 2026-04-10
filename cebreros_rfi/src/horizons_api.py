@@ -7,6 +7,12 @@ from pathlib import Path
 import pandas as pd
 import requests
 
+from mission_names import (
+    accepted_mission_names_text,
+    normalize_mission_name,
+    resolve_mission_dir,
+)
+
 
 # Horizons API endpoint.
 HORIZONS_API_URL = "https://ssd.jpl.nasa.gov/api/horizons.api"
@@ -23,12 +29,6 @@ MISSION_COMMANDS = {
     "MEX1": "-41",
     "EUCL": "-680",
 }
-
-# Folder names normalized to the expected mission names.
-MISSION_ALIASES = {
-    "JUIC": "JUICE",
-}
-
 
 @dataclass(frozen=True)
 class GroundStation:
@@ -59,10 +59,16 @@ def main():
     all_summary = []
 
     # Process each requested mission independently.
-    for mission in args.missions:
-        mission_dir = station_root / mission
+    for mission_input in args.missions:
+        mission, mission_dir = resolve_mission_dir(station_root, mission_input)
         if not mission_dir.exists():
-            print(f"Skipping {mission}: directory not found -> {mission_dir}")
+            print(
+                "Skipping {0}: mission folder not found for input '{1}' -> {2}".format(
+                    mission,
+                    mission_input,
+                    mission_dir,
+                )
+            )
             continue
 
         summary_df = process_mission(
@@ -99,7 +105,10 @@ def build_argument_parser():
         "--missions",
         nargs="+",
         default=["HERA", "JUICE", "SOLO"],
-        help="Missions to process. Default: HERA JUICE SOLO",
+        help=(
+            "Missions to process. Accepted names: {0}. "
+            "Default: HERA JUICE SOLO"
+        ).format(accepted_mission_names_text()),
     )
 
     parser.add_argument(
@@ -131,7 +140,7 @@ def process_mission(
 ):
     # Normalize the mission name and prepare the output directory.
     mission_raw = mission_dir.name.upper()
-    mission = MISSION_ALIASES.get(mission_raw, mission_raw)
+    mission = normalize_mission_name(mission_raw)
     if mission not in MISSION_COMMANDS:
         raise KeyError(f"No Horizons command configured for mission '{mission}'")
 

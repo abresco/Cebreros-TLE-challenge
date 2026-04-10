@@ -1,0 +1,433 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Case 2 Benchmark Visual Report</title>
+<style>
+body {
+    font-family: Arial, sans-serif;
+    margin: 24px;
+    line-height: 1.4;
+}
+h1, h2 {
+    margin-top: 28px;
+}
+.card-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(160px, 1fr));
+    gap: 12px;
+    margin-bottom: 24px;
+}
+.card {
+    border: 1px solid #ccc;
+    border-radius: 8px;
+    padding: 12px;
+}
+.card-title {
+    font-size: 13px;
+    color: #555;
+}
+.card-value {
+    font-size: 26px;
+    font-weight: bold;
+}
+table {
+    border-collapse: collapse;
+    width: 100%;
+    margin-top: 12px;
+}
+th, td {
+    border: 1px solid #ccc;
+    padding: 6px 8px;
+    text-align: left;
+    font-size: 13px;
+}
+th {
+    background-color: #f2f2f2;
+}
+img {
+    max-width: 100%;
+    border: 1px solid #ccc;
+    margin-top: 8px;
+}
+.legend ul {
+    margin-top: 6px;
+}
+.small {
+    color: #555;
+    font-size: 13px;
+}
+</style>
+</head>
+<body>
+<h1>Case 2 Benchmark Visual Report</h1>
+
+<div class="card-grid">
+    <div class="card"><div class="card-title">Total incidents</div><div class="card-value">12</div></div>
+    <div class="card"><div class="card-title">Processed</div><div class="card-value">11</div></div>
+    <div class="card"><div class="card-title">No pass found</div><div class="card-value">1</div></div>
+    <div class="card"><div class="card-title">Errors</div><div class="card-value">0</div></div>
+    <div class="card"><div class="card-title">Strong candidates</div><div class="card-value">1</div></div>
+    <div class="card"><div class="card-title">Possible candidates</div><div class="card-value">0</div></div>
+    <div class="card"><div class="card-title">Weak candidates</div><div class="card-value">10</div></div>
+</div>
+
+<h2>Best case found</h2>
+
+        <ul>
+            <li><strong>Incident:</strong> RFI_012</li>
+            <li><strong>Mission:</strong> SOLO</li>
+            <li><strong>Top candidate:</strong> CSG-2</li>
+            <li><strong>Minimum separation:</strong> 0.203 deg</li>
+            <li><strong>Time offset:</strong> 12.0 s</li>
+        </ul>
+        
+
+<h2>Legend</h2>
+<div class="legend">
+<ul>
+<li><strong>strong_candidate</strong>: min_sep ≤ 1 deg and offset ≤ 30 s</li>
+<li><strong>possible_candidate</strong>: min_sep ≤ 3 deg and offset ≤ 60 s</li>
+<li><strong>weak_candidate</strong>: processed but not meeting the above thresholds</li>
+<li><strong>no_pass_found</strong>: no station pass matched the incident timestamp</li>
+<li><strong>error</strong>: normalization or execution problem</li>
+</ul>
+</div>
+
+<h2>Processing status</h2>
+<img src="incident_status_counts.png" alt="status plot">
+
+<h2>Top-1 ranking by minimum separation</h2>
+<img src="incident_top1_ranking.png" alt="ranking plot">
+
+<h2>Top-1 quality scatter</h2>
+<p class="small">X axis: time offset in seconds. Y axis: minimum separation in degrees.</p>
+<img src="incident_top1_scatter.png" alt="scatter plot">
+
+<h2>Incident summary table</h2>
+<table>
+<thead><tr><th>incident_id</th><th>mission</th><th>mission_folder</th><th>label</th><th>status</th><th>quality_class</th><th>pass_name</th><th>num_candidates</th><th>top1_object_name</th><th>top1_min_sep_deg</th><th>top1_time_offset_sec</th><th>top1_risk_level</th><th>top1_groups</th></tr></thead>
+<tbody>
+<tr style="background-color: #f8d7da;">
+<td>RFI_001</td>
+<td>HERA</td>
+<td>HERA</td>
+<td>uncertain</td>
+<td>processed</td>
+<td>weak_candidate</td>
+<td>20250219_155646_20250220_035646</td>
+<td>0.000</td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr style="background-color: #e2e3e5;">
+<td>RFI_002</td>
+<td>MEX1</td>
+<td>MEX1</td>
+<td>possible_rfi</td>
+<td>no_pass_found</td>
+<td>no_pass_found</td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr style="background-color: #f8d7da;">
+<td>RFI_003</td>
+<td>SOLO</td>
+<td>SOLO</td>
+<td>discarded</td>
+<td>processed</td>
+<td>weak_candidate</td>
+<td>20250327_070000_20250327_160000</td>
+<td>1.000</td>
+<td>LEMUR-2-TEODOR</td>
+<td>4.297</td>
+<td>179.000</td>
+<td>LOW</td>
+<td>SPIRE</td>
+</tr>
+<tr style="background-color: #f8d7da;">
+<td>RFI_004</td>
+<td>SOLO</td>
+<td>SOLO</td>
+<td>possible_rfi</td>
+<td>processed</td>
+<td>weak_candidate</td>
+<td>20250418_070000_20250418_160000</td>
+<td>0.000</td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr style="background-color: #f8d7da;">
+<td>RFI_005</td>
+<td>SOLO</td>
+<td>SOLO</td>
+<td>uncertain</td>
+<td>processed</td>
+<td>weak_candidate</td>
+<td>20250602_095457_20250602_185457</td>
+<td>0.000</td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr style="background-color: #f8d7da;">
+<td>RFI_006</td>
+<td>BEPI</td>
+<td>BEPI</td>
+<td>possible_rfi</td>
+<td>processed</td>
+<td>weak_candidate</td>
+<td>20250715_113500_20250715_153000</td>
+<td>1.000</td>
+<td>TANAGER-1</td>
+<td>4.662</td>
+<td>126.000</td>
+<td>LOW</td>
+<td>PLANET</td>
+</tr>
+<tr style="background-color: #f8d7da;">
+<td>RFI_007</td>
+<td>MEX1</td>
+<td>MEX1</td>
+<td>uncertain</td>
+<td>processed</td>
+<td>weak_candidate</td>
+<td>20250715_163000_20250715_190000</td>
+<td>0.000</td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr style="background-color: #f8d7da;">
+<td>RFI_008</td>
+<td>JUICE</td>
+<td>JUIC</td>
+<td>possible_rfi</td>
+<td>processed</td>
+<td>weak_candidate</td>
+<td>20250725_040118_20250725_122818</td>
+<td>2.000</td>
+<td>COSMO-SKYMED 4</td>
+<td>1.438</td>
+<td>178.000</td>
+<td>MEDIUM</td>
+<td>RESOURCE</td>
+</tr>
+<tr style="background-color: #f8d7da;">
+<td>RFI_009</td>
+<td>SOLO</td>
+<td>SOLO</td>
+<td>possible_rfi</td>
+<td>processed</td>
+<td>weak_candidate</td>
+<td>20250909_085220_20250909_175220</td>
+<td>1.000</td>
+<td>METEOSAT-11 (MSG-4)</td>
+<td>3.426</td>
+<td>180.000</td>
+<td>LOW</td>
+<td>WEATHER</td>
+</tr>
+<tr style="background-color: #f8d7da;">
+<td>RFI_010</td>
+<td>HERA</td>
+<td>HERA</td>
+<td>possible_rfi</td>
+<td>processed</td>
+<td>weak_candidate</td>
+<td>20250915_101114_20250915_181114</td>
+<td>1.000</td>
+<td>ELEKTRO-L 2</td>
+<td>4.361</td>
+<td>179.000</td>
+<td>LOW</td>
+<td>WEATHER</td>
+</tr>
+<tr style="background-color: #f8d7da;">
+<td>RFI_011</td>
+<td>SOLO</td>
+<td>SOLO</td>
+<td>uncertain</td>
+<td>processed</td>
+<td>weak_candidate</td>
+<td>20251130_095814_20251130_155814</td>
+<td>0.000</td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr style="background-color: #d9f2d9;">
+<td>RFI_012</td>
+<td>SOLO</td>
+<td>SOLO</td>
+<td>uncertain</td>
+<td>processed</td>
+<td>strong_candidate</td>
+<td>20251230_040540_20251230_060546</td>
+<td>4.000</td>
+<td>CSG-2</td>
+<td>0.203</td>
+<td>12.000</td>
+<td>HIGH</td>
+<td>RESOURCE</td>
+</tr>
+</tbody>
+</table>
+
+<h2>Top candidate rows</h2>
+<table>
+<thead><tr><th>incident_id</th><th>mission</th><th>mission_folder</th><th>label</th><th>rank</th><th>object_name</th><th>norad_cat_id</th><th>groups</th><th>min_sep_deg</th><th>time_offset_sec</th><th>risk_level</th></tr></thead>
+<tbody>
+<tr>
+<td>RFI_012</td>
+<td>SOLO</td>
+<td>SOLO</td>
+<td>uncertain</td>
+<td>1</td>
+<td>CSG-2</td>
+<td>51444</td>
+<td>RESOURCE</td>
+<td>0.203</td>
+<td>12.000</td>
+<td>HIGH</td>
+</tr>
+<tr>
+<td>RFI_012</td>
+<td>SOLO</td>
+<td>SOLO</td>
+<td>uncertain</td>
+<td>2</td>
+<td>SMOS</td>
+<td>36036</td>
+<td>RESOURCE</td>
+<td>0.902</td>
+<td>18.000</td>
+<td>HIGH</td>
+</tr>
+<tr>
+<td>RFI_008</td>
+<td>JUICE</td>
+<td>JUIC</td>
+<td>possible_rfi</td>
+<td>1</td>
+<td>COSMO-SKYMED 4</td>
+<td>37216</td>
+<td>RESOURCE</td>
+<td>1.438</td>
+<td>178.000</td>
+<td>MEDIUM</td>
+</tr>
+<tr>
+<td>RFI_009</td>
+<td>SOLO</td>
+<td>SOLO</td>
+<td>possible_rfi</td>
+<td>1</td>
+<td>METEOSAT-11 (MSG-4)</td>
+<td>40732</td>
+<td>WEATHER</td>
+<td>3.426</td>
+<td>180.000</td>
+<td>LOW</td>
+</tr>
+<tr>
+<td>RFI_012</td>
+<td>SOLO</td>
+<td>SOLO</td>
+<td>uncertain</td>
+<td>3</td>
+<td>TIANMU-1 16</td>
+<td>58701</td>
+<td>WEATHER</td>
+<td>3.449</td>
+<td>82.000</td>
+<td>LOW</td>
+</tr>
+<tr>
+<td>RFI_008</td>
+<td>JUICE</td>
+<td>JUIC</td>
+<td>possible_rfi</td>
+<td>2</td>
+<td>SMOS</td>
+<td>36036</td>
+<td>RESOURCE</td>
+<td>3.718</td>
+<td>112.000</td>
+<td>LOW</td>
+</tr>
+<tr>
+<td>RFI_012</td>
+<td>SOLO</td>
+<td>SOLO</td>
+<td>uncertain</td>
+<td>4</td>
+<td>LEMUR-2-PETERG</td>
+<td>42841</td>
+<td>SPIRE</td>
+<td>3.886</td>
+<td>84.000</td>
+<td>LOW</td>
+</tr>
+<tr>
+<td>RFI_003</td>
+<td>SOLO</td>
+<td>SOLO</td>
+<td>discarded</td>
+<td>1</td>
+<td>LEMUR-2-TEODOR</td>
+<td>66768</td>
+<td>SPIRE</td>
+<td>4.297</td>
+<td>179.000</td>
+<td>LOW</td>
+</tr>
+<tr>
+<td>RFI_010</td>
+<td>HERA</td>
+<td>HERA</td>
+<td>possible_rfi</td>
+<td>1</td>
+<td>ELEKTRO-L 2</td>
+<td>41105</td>
+<td>WEATHER</td>
+<td>4.361</td>
+<td>179.000</td>
+<td>LOW</td>
+</tr>
+<tr>
+<td>RFI_006</td>
+<td>BEPI</td>
+<td>BEPI</td>
+<td>possible_rfi</td>
+<td>1</td>
+<td>TANAGER-1</td>
+<td>60507</td>
+<td>PLANET</td>
+<td>4.662</td>
+<td>126.000</td>
+<td>LOW</td>
+</tr>
+</tbody>
+</table>
+
+</body>
+</html>

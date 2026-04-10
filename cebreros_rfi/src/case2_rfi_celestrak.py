@@ -11,12 +11,12 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import List, Optional
 from urllib.parse import urlencode
 from urllib.request import urlopen
 
 import numpy as np
 from skyfield.api import EarthSatellite, load, wgs84
-
 
 # CelesTrak endpoint used to download GP data in JSON format.
 CELESTRAK_GP_URL = "https://celestrak.org/NORAD/elements/gp.php"
@@ -69,98 +69,191 @@ class CandidateSummary:
     frequency_band: str = "UNKNOWN"
 
 
+@dataclass(frozen=True)
+class IdentificationRequest:
+    az_file: Path
+    el_file: Path
+    groups: List[str]
+    max_separation_deg: float = 5.0
+    high_risk_sep_deg: float = 1.0
+    medium_risk_sep_deg: float = 3.0
+    merge_tolerance_seconds: float = 2.0
+    station_lat: float = 40.4526889
+    station_lon: float = -4.36755
+    station_elevation_m: float = 794.0
+    incident_time_utc: Optional[datetime] = None
+    window_seconds: Optional[int] = None
+
+
+@dataclass
+class IdentificationResult:
+    mission_name: str
+    pass_start_utc: datetime
+    pass_end_utc: datetime
+    station_samples: List[StationSample]
+    summaries: List[CandidateSummary]
+    detailed_rows: List[dict]
+
+
 class ScriptError(RuntimeError):
     pass
 
 
-def main():
-    # Read arguments and validate the input files first.
-    args = parse_args()
-    az_path = Path(args.az_file)
-    el_path = Path(args.el_file)
+def filter_station_samples_around_incident(
+    station_samples,
+    incident_time_utc=None,
+    window_seconds=None,
+):
+    # Keep only the samples around the incident when a time window is requested.
+    if incident_time_utc is None or window_seconds is None:
+        return station_samples
+
+    half_window = timedelta(seconds=window_seconds)
+    start_utc = incident_time_utc - half_window
+    end_utc = incident_time_utc + half_window
+
+    filtered = [sample for sample in station_samples if start_utc <= sample.timestamp <= end_utc]
+
+    if not filtered:
+        raise ScriptError("No station samples found inside the requested incident window.")
+
+    return filtered
+
+
+def run_identification(request, preloaded_satellites=None):
+    # Load the station samples, run the satellite comparison and return the result.
+    az_path = Path(request.az_file)
+    el_path = Path(request.el_file)
 
     if not az_path.exists():
-        raise ScriptError(f"AZ file not found: {az_path}")
+        raise ScriptError("AZ file not found: {0}".format(az_path))
     if not el_path.exists():
-        raise ScriptError(f"EL file not found: {el_path}")
+        raise ScriptError("EL file not found: {0}".format(el_path))
 
-    # Extract pass metadata and make sure both files belong together.
     az_meta = parse_pass_metadata(az_path)
     el_meta = parse_pass_metadata(el_path)
 
     if az_meta["mission"] != el_meta["mission"]:
         raise ScriptError("AZ and EL files do not belong to the same mission/pass.")
 
-    # Load and merge the real antenna samples.
     pass_start_date = datetime.strptime(az_meta["start_date"], "%Y%m%d").date()
     az_samples = read_axis_csv(az_path, pass_start_date)
     el_samples = read_axis_csv(el_path, pass_start_date)
+
     station_samples = merge_az_el_samples(
         az_samples,
         el_samples,
-        tolerance_seconds=args.merge_tolerance_seconds,
+        tolerance_seconds=request.merge_tolerance_seconds,
     )
 
-    start_time = station_samples[0].timestamp
-    end_time = station_samples[-1].timestamp
+    station_samples = filter_station_samples_around_incident(
+        station_samples=station_samples,
+        incident_time_utc=request.incident_time_utc,
+        window_seconds=request.window_seconds,
+    )
+
     mission_name = az_meta["mission"]
-
-    print("\n----------------------------------")
-    print("Case 2 candidate screening")
-    print("----------------------------------")
-    print(f"Mission/pass     : {mission_name}")
-    print(f"Time window UTC  : {start_time.isoformat()} -> {end_time.isoformat()}")
-    print(f"Merged samples   : {len(station_samples)}")
-    print(f"CelesTrak groups : {args.groups}")
-    print("----------------------------------\n")
-
-    # Build the station and load all candidate satellites from CelesTrak.
     ts = load.timescale()
-    station = build_station(args.station_lat, args.station_lon, args.station_elevation_m)
-    groups = [item.strip().upper() for item in args.groups.split(",") if item.strip()]
-    satellites = load_satellites_from_celestrak(groups, ts)
+    station = build_station(
+        request.station_lat,
+        request.station_lon,
+        request.station_elevation_m,
+    )
 
-    # Compare the real antenna pointing against all visible satellites.
+    if preloaded_satellites is None:
+        satellites = load_satellites_from_celestrak(request.groups, ts)
+    else:
+        satellites = preloaded_satellites
+
     summaries, detailed_rows = analyze_candidates(
         station_samples=station_samples,
         satellites=satellites,
         station=station,
         ts=ts,
+        max_separation_deg=request.max_separation_deg,
+        high_risk_sep_deg=request.high_risk_sep_deg,
+        medium_risk_sep_deg=request.medium_risk_sep_deg,
+    )
+
+    return IdentificationResult(
+        mission_name=mission_name,
+        pass_start_utc=station_samples[0].timestamp,
+        pass_end_utc=station_samples[-1].timestamp,
+        station_samples=station_samples,
+        summaries=summaries,
+        detailed_rows=detailed_rows,
+    )
+
+
+def main():
+    # Build the identification request from the CLI arguments.
+    args = parse_args()
+
+    request = IdentificationRequest(
+        az_file=Path(args.az_file),
+        el_file=Path(args.el_file),
+        groups=[item.strip().upper() for item in args.groups.split(",") if item.strip()],
         max_separation_deg=args.max_separation_deg,
         high_risk_sep_deg=args.high_risk_sep_deg,
         medium_risk_sep_deg=args.medium_risk_sep_deg,
+        merge_tolerance_seconds=args.merge_tolerance_seconds,
+        station_lat=args.station_lat,
+        station_lon=args.station_lon,
+        station_elevation_m=args.station_elevation_m,
     )
 
-    # Write the final ranking and optionally the detailed close samples.
+    result = run_identification(request)
+
+    # Print a short execution summary and save the output files.
+    print("\n----------------------------------")
+    print("Case 2 candidate screening")
+    print("----------------------------------")
+    print("Mission/pass     : {0}".format(result.mission_name))
+    print(
+        "Time window UTC  : {0} -> {1}".format(
+            result.pass_start_utc.isoformat(),
+            result.pass_end_utc.isoformat(),
+        )
+    )
+    print("Merged samples   : {0}".format(len(result.station_samples)))
+    print("CelesTrak groups : {0}".format(",".join(request.groups)))
+    print("----------------------------------\n")
+
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    safe_mission = re.sub(r"[^A-Za-z0-9_.-]+", "_", mission_name)
-    summary_path = output_dir / f"{safe_mission}_candidate_summary.csv"
-    detailed_path = output_dir / f"{safe_mission}_candidate_samples.csv"
+    safe_mission = re.sub(r"[^A-Za-z0-9_.-]+", "_", result.mission_name)
+    summary_path = output_dir / "{0}_candidate_summary.csv".format(safe_mission)
+    detailed_path = output_dir / "{0}_candidate_samples.csv".format(safe_mission)
 
-    top_summaries = summaries[: args.top_n]
+    top_summaries = result.summaries[: args.top_n]
     write_summary_csv(summary_path, top_summaries)
+
     if args.write_detailed_samples:
-        write_detailed_csv(detailed_path, detailed_rows)
+        write_detailed_csv(detailed_path, result.detailed_rows)
 
     print("\n----------------------------------")
     print("Analysis summary")
     print("----------------------------------")
-    print(f"Unique satellites analysed   : {len(satellites)}")
-    print(f"Candidate satellites found   : {len(summaries)}")
-    print(f"Summary CSV                  : {summary_path}")
+    print("Candidate satellites found   : {0}".format(len(result.summaries)))
+    print("Summary CSV                  : {0}".format(summary_path))
+
     if args.write_detailed_samples:
-        print(f"Detailed samples CSV         : {detailed_path}")
+        print("Detailed samples CSV         : {0}".format(detailed_path))
 
     if top_summaries:
         print("\nTop candidates:")
         for rank, item in enumerate(top_summaries[:10], start=1):
             print(
-                f"{rank:02d}. {item.object_name} "
-                f"(NORAD {item.norad_cat_id}) | min_sep={item.min_sep_deg:.3f} deg | "
-                f"risk={item.risk_level} | groups={item.groups} | "
-                f"closest={item.closest_time_utc.isoformat()}"
+                "{0:02d}. {1} (NORAD {2}) | min_sep={3:.3f} deg | risk={4} | groups={5} | closest={6}".format(
+                    rank,
+                    item.object_name,
+                    item.norad_cat_id,
+                    item.min_sep_deg,
+                    item.risk_level,
+                    item.groups,
+                    item.closest_time_utc.isoformat(),
+                )
             )
     else:
         print("No candidates found within the configured separation threshold.")
@@ -262,10 +355,9 @@ def parse_pass_metadata(path):
         return metadata
 
     raise ScriptError(
-        f"Could not parse pass metadata from filename: {path.name}. "
-        "Supported layouts are: "
-        "YYYYMMDD-HHMMSS-YYYYMMDD-HHMMSS-NAME-AZ.csv "
-        "or .../MISSION/YYYYMMDD_HHMMSS_YYYYMMDD_HHMMSS/AZ.csv"
+        "Could not parse pass metadata from filename: {0}. Supported layouts are: "
+        "YYYYMMDD-HHMMSS-YYYYMMDD-HHMMSS-NAME-AZ.csv or "
+        ".../MISSION/YYYYMMDD_HHMMSS_YYYYMMDD_HHMMSS/AZ.csv".format(path.name)
     )
 
 
@@ -287,7 +379,6 @@ def read_axis_csv(path, start_date):
             except (ScriptError, ValueError):
                 continue
 
-            # Advance the date when the clock wraps after midnight.
             if previous_clock is not None and clock_time < previous_clock:
                 current_date += timedelta(days=1)
             previous_clock = clock_time
@@ -296,7 +387,7 @@ def read_axis_csv(path, start_date):
             samples.append((timestamp, angle_deg))
 
     if not samples:
-        raise ScriptError(f"No valid samples found in {path}")
+        raise ScriptError("No valid samples found in {0}".format(path))
 
     return samples
 
@@ -310,7 +401,7 @@ def parse_time_string(value):
         except ValueError:
             continue
 
-    raise ScriptError(f"Unsupported time format in station file: {value!r}")
+    raise ScriptError("Unsupported time format in station file: {0!r}".format(value))
 
 
 def merge_az_el_samples(
@@ -366,7 +457,7 @@ def load_satellites_from_celestrak(groups, ts):
 
     for group in groups:
         rows = fetch_celestrak_group(group)
-        print(f"Loaded {len(rows)} objects from CelesTrak group {group.upper()}")
+        print("Loaded {0} objects from CelesTrak group {1}".format(len(rows), group.upper()))
 
         for row in rows:
             catnr = str(row.get("NORAD_CAT_ID", "")).strip()
@@ -375,7 +466,7 @@ def load_satellites_from_celestrak(groups, ts):
 
             if catnr not in satellites_by_catnr:
                 satellite = EarthSatellite.from_omm(ts, row)
-                satellites_by_catnr[catnr] = (satellite, {group.upper()}, row)
+                satellites_by_catnr[catnr] = (satellite, set([group.upper()]), row)
             else:
                 satellites_by_catnr[catnr][1].add(group.upper())
 
@@ -383,14 +474,14 @@ def load_satellites_from_celestrak(groups, ts):
     for satellite, group_set, row in satellites_by_catnr.values():
         result.append((satellite, sorted(group_set), row))
 
-    print(f"Total unique satellites loaded: {len(result)}")
+    print("Total unique satellites loaded: {0}".format(len(result)))
     return result
 
 
 def fetch_celestrak_group(group):
     # Request one CelesTrak GP group in JSON format.
     params = {"GROUP": group.upper(), "FORMAT": "JSON"}
-    url = f"{CELESTRAK_GP_URL}?{urlencode(params)}"
+    url = "{0}?{1}".format(CELESTRAK_GP_URL, urlencode(params))
 
     with urlopen(url, timeout=60) as response:
         payload = response.read().decode("utf-8")
@@ -398,10 +489,10 @@ def fetch_celestrak_group(group):
     try:
         data = json.loads(payload)
     except json.JSONDecodeError as exc:
-        raise ScriptError(f"Invalid JSON received from CelesTrak for group {group}: {exc}") from exc
+        raise ScriptError("Invalid JSON received from CelesTrak for group {0}: {1}".format(group, exc))
 
     if not isinstance(data, list):
-        raise ScriptError(f"Unexpected response format from CelesTrak for group {group}")
+        raise ScriptError("Unexpected response format from CelesTrak for group {0}".format(group))
 
     return data
 
@@ -475,12 +566,12 @@ def analyze_candidates(
                     "norad_cat_id": summary.norad_cat_id,
                     "groups": summary.groups,
                     "time_utc": station_samples[idx].timestamp.isoformat(),
-                    "separation_deg": f"{separation[idx]:.6f}",
-                    "sat_az_deg": f"{sat_az[idx]:.6f}",
-                    "sat_el_deg": f"{sat_el[idx]:.6f}",
-                    "sat_range_km": f"{sat_range_km[idx]:.3f}",
-                    "antenna_az_deg": f"{antenna_az[idx]:.6f}",
-                    "antenna_el_deg": f"{antenna_el[idx]:.6f}",
+                    "separation_deg": "{0:.6f}".format(separation[idx]),
+                    "sat_az_deg": "{0:.6f}".format(sat_az[idx]),
+                    "sat_el_deg": "{0:.6f}".format(sat_el[idx]),
+                    "sat_range_km": "{0:.3f}".format(sat_range_km[idx]),
+                    "antenna_az_deg": "{0:.6f}".format(antenna_az[idx]),
+                    "antenna_el_deg": "{0:.6f}".format(antenna_el[idx]),
                     "risk_level": summary.risk_level,
                 }
             )
@@ -552,13 +643,13 @@ def write_summary_csv(path, summaries):
                     item.groups,
                     item.visible_samples,
                     item.close_samples,
-                    f"{item.min_sep_deg:.6f}",
+                    "{0:.6f}".format(item.min_sep_deg),
                     item.closest_time_utc.isoformat(),
-                    f"{item.sat_az_deg:.6f}",
-                    f"{item.sat_el_deg:.6f}",
-                    f"{item.sat_range_km:.3f}",
-                    f"{item.antenna_az_deg:.6f}",
-                    f"{item.antenna_el_deg:.6f}",
+                    "{0:.6f}".format(item.sat_az_deg),
+                    "{0:.6f}".format(item.sat_el_deg),
+                    "{0:.3f}".format(item.sat_range_km),
+                    "{0:.6f}".format(item.antenna_az_deg),
+                    "{0:.6f}".format(item.antenna_el_deg),
                     item.risk_level,
                     item.frequency_band,
                 ]
@@ -581,5 +672,5 @@ if __name__ == "__main__":
     try:
         raise SystemExit(main())
     except ScriptError as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
+        print("ERROR: {0}".format(exc), file=sys.stderr)
         raise SystemExit(1)

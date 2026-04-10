@@ -1,0 +1,149 @@
+incident_id,mission,mission_folder,incident_time_utc,label,reported_incident,investigation,status,pass_name,pass_start_utc,pass_end_utc,num_candidates,top1_object_name,top1_norad_cat_id,top1_min_sep_deg,top1_risk_level,top1_groups,top1_closest_time_utc,top1_time_offset_sec,has_candidate_within_1deg,has_candidate_within_3deg,has_candidate_within_5deg,error_message
+RFI_001,HERA,HERA,2025-02-19T23:16:00+00:00,uncertain,"HERA Mission reports 2 frames out of sequence for 2 seconds.
+Station looks good, good lock and es/no, but a small drop can be observed on the charts on that specific
+time. Might be an RFI from ESTRACK pov.
+IMPACT: 2 seconds of 2 frames oos.","The Carrier Loop Level at the time of the incident can be checked as follows: snapshot attached
+
+It can be observed an ≈ 1.5-dB increasing at the very time of the incident, so it could reinforce the idea of an interfering signal as stated in the DIL.",processed,20250219_155646_20250220_035646,2025-02-19T15:56:46+00:00,2025-02-20T03:56:46+00:00,0.0,,,,,,,,False,False,False,
+RFI_002,MEX1,MEX1,2025-03-19T23:51:00+00:00,possible_rfi,"CEB 078 2025-03-19 23:51:23 MEX frames out of sequence
+23:38:44=>12 frames, 1 second
+23:41:56=>5 frames, 1 second
+drops observed on both charts, high possibility of an RFI.
+Further investigation needed by engineering.","The following error messages related to “Loos of Synchro” are reported by the TTCP.
+
+20250319.233928.600| Message   |TMTCS_TPS      |TPS - sagr=143.spack=CEB1-PERM.rsl-fg=1.rcf=onlc0001 LOSS OF SYNCHRO
+20250319.233928.600| Message   |TMTCS_TPS      |TPS - sagr=143.spack=CEB1-PERM.rsl-fg=1.rcf=onlc0402 LOSS OF SYNCHRO
+20250319.233928.600| Message   |TMTCS_TPS      |TPS - sagr=143.spack=CEB1-PERM.rsl-fg=1.rcf=onlc0501 LOSS OF SYNCHRO
+20250319.233928.600| Message   |TMTCS_TPS      |TPS - sagr=143.spack=CEB1-PERM.rsl-fg=1.rcf=onlc0601 LOSS OF SYNCHRO
+
+20250319.235832.900| Message   |TMTCS_TPS      |TPS - sagr=143.spack=CEB1-PERM.rsl-fg=1.rcf=onlc0001 LOSS OF SYNCHRO
+20250319.235833.800| Message   |TMTCS_TPS      |TPS - sagr=143.spack=CEB1-PERM.rsl-fg=1.rcf=onlc0001 LOSS OF SYNCHRO
+20250319.235833.900| Message   |TMTCS_TPS      |TPS - sagr=143.spack=CEB1-PERM.rsl-fg=1.rcf=onlc0001 LOSS OF SYNCHRO
+20250319.235834.500| Warning   |TMTCS_TPS      |TPS - TCDS TM frame from TMRT3 has invalid version (3)expected PTM(0)
+20250319.235834.900| Warning   |TMTCS_TPS      |TPS - TCDS TM frame from TMRT3 has invalid version (3)expected PTM(0)
+
+TTCP Log is attached for further investigation if required.",no_pass_found,,,,,,,,,,,,,,,
+RFI_003,SOLO,SOLO,2025-03-27T11:08:00+00:00,discarded,"Spacon reports TM gap between 11:08:06 to 11:11:00.
+- Spacon reports TM and probably TC affected.
+- Probably RFI.
+- TM/TC affected 3 minutes.
+UPDATE:
+Spacon confirms problem caused by antenna swap onboard S/C.",It is not related to Station issues.,processed,20250327_070000_20250327_160000,2025-03-27T07:00:00+00:00,2025-03-27T16:00:00+00:00,1.0,LEMUR-2-TEODOR,66768,4.29723775993106,LOW,SPIRE,2025-03-27T11:10:59+00:00,179.0,False,False,True,
+RFI_004,SOLO,SOLO,2025-04-18T10:34:00+00:00,possible_rfi,"Spacon reports TM drops.
+Stations look nominal; the logs show a drop in Sn/No and AGC at the reported time.
+Impact: TM drop of 1 second.","Some relevant parameter during the incident can be found as follows: snapshot attached
+
+At the time of the incident, it can be seen that Carrier Loop Level is increasing in ≈ 9dB, while Es/No remains stable around -8dB. Weather conditions were good (no rain nor high winds), so this TM drop could be due to some punctual RFI/ASI (pointing data at the time of the incident: AZ 148.3, EL 56.6).
+
+You can also find attached a text file (dish-pointing-data.txt) with pointing data from every GEO satellite over CEB Station footprint.",processed,20250418_070000_20250418_160000,2025-04-18T07:00:00+00:00,2025-04-18T16:00:00+00:00,0.0,,,,,,,,False,False,False,
+RFI_005,SOLO,SOLO,2025-06-02T14:24:00+00:00,uncertain,"CEB 153 2025-06-02 14:24:36 SOLO Mission reported missing frames for the following timestamps:
+14:24:51 (1 frame out of sequence)/13:31:18 (1 frame out of sequence). 
+Weather at the station looks nominal, no drops observed in charts.","•	Carrier and Es/No drop are visible. at 13:31:21 Z, it might be an RFI.
+
+•	Carrier Level
+
+13:31:19	-65.79
+13:31:21	-74.06
+13:31:23	-65.36
+
+•	Es/No
+ 
+
+13:31:19	0.1
+13:31:21	-2.59
+13:31:23	-0.58
+
+Charts are attached for further investigation if required.",processed,20250602_095457_20250602_185457,2025-06-02T09:54:57+00:00,2025-06-02T18:54:57+00:00,0.0,,,,,,,,False,False,False,
+RFI_006,BEPI,BEPI,2025-07-15T11:57:00+00:00,possible_rfi,"Spacon reports frames out of sequence.
+- Station looks nominal.
+Impact 3 frames out sequence 3 seconds.","AGC and Es/N0 charts have been retrieved from STC logs  and it can be checked that, at the time of the reported incident (11:57 UTC), a drop is observed on both TTCP: snapshot attached
+
+The duration of the incident was 3 seconds, Station was good as well as weather conditions, so it could be due to a RFI from any nearby mission. In the chart above, AZ/EL values can be also checked: AZ ≈ 140 deg, EL ≈ 59 deg. GEO satellites pointing data from CEB have been retrieved, and their elevations are around 25 degrees below the BEPI one, so a RFI coming from these type of satellites could be discarded (see table below).
+
+Sat   Name               Azim   Elev  Pol   Inc
+Long                     deg    deg   deg   deg
+  23.0 ANGOSAT 2          141.4  35.4 -28.3  0.02
+  23.5 ASTRA 5B           140.8  35.2 -28.7  0.08
+  23.5 ASTRA 3B           140.8  35.2 -28.7  0.05
+  24.0 USA 342            140.2  34.9 -29.1  0.04
+  24.9 ALPHASAT           139.2  34.4 -29.8  2.87
+  25.1 SKYNET 5B          138.9  34.3 -30.0  3.06
+
+It is noticeable that at around 11:48 UTC a quite more significant drop is observed in AGC & Es/N0 on both TTCP, but no log entry has been reported.",processed,20250715_113500_20250715_153000,2025-07-15T11:35:00+00:00,2025-07-15T15:30:00+00:00,1.0,TANAGER-1,60507,4.661688783173253,LOW,PLANET,2025-07-15T11:54:54+00:00,126.0,False,False,True,
+RFI_007,MEX1,MEX1,2025-07-15T17:46:00+00:00,uncertain,"Spacon reports no TM from 17:46:43 to 17:48:06
+- At the station, we observed bad frames. Charts show fluctuations in AGC and S/N ratio.
+- After one minute, TM was good again
+Impact: No TM for 1 minute and 40 seconds.","Regarding the second incident at 17:46 UTC, it can be checked as follows that indeed there was a common drop in both AGC and Es/N0 nominal levels, as well as observed on both TTCP: snapshot attached
+
+G/S was nominal, weather conditions were good, so in principle the main suspect is a RFI from any adjacent Martian mission.",processed,20250715_163000_20250715_190000,2025-07-15T16:30:00+00:00,2025-07-15T19:00:00+00:00,0.0,,,,,,,,False,False,False,
+RFI_008,JUICE,JUIC,2025-07-25T04:57:00+00:00,possible_rfi,Missing transfer frame at 04:57:49. Station looks nominal.,"At the time of the incident it can be observed a huge 15-dB increase in the TTCP Rx Level together with a significant 7-dB drop in the Es/N0: snapshot attached
+
+Weather conditions were good over CEB Station so, taking also into account the short duration (just few seconds), this incident could be due to an ASI/RFI.",processed,20250725_040118_20250725_122818,2025-07-25T04:01:18+00:00,2025-07-25T12:28:18+00:00,2.0,COSMO-SKYMED 4,37216,1.4377280956895147,MEDIUM,RESOURCE,2025-07-25T04:59:58+00:00,178.0,False,True,True,
+RFI_009,SOLO,SOLO,2025-09-09T10:27:00+00:00,possible_rfi,CEB 252 2025-09-09 10:27:00 SOLO CEB SOLO Frames out of sequence 10:27 Weather looks fine no impact,"Having a look at the Carrier Level and Es/No values on the 09/09/2025 SOLO Pass, a Carrier Level and Es/No drop is observed at 10:26:22. See below details,
+
+•	Carrier Level:
+
+10:26:16     -63.04
+10:26:18     -63.04
+10:26:20     -63.24
+10:26:22     -73.7
+10:26:24     -63.18
+10:26:26     -63.15
+
+•	Es/No:
+
+10:26:16     -1.47
+10:26:18     -1.44
+10:26:20     -1.44
+10:26:22     -7.87
+10:26:24     -2.64
+10:26:26     -1.67
+
+It might be related to RFI.
+
+Hereafter the complete pass charts for the Carrier Level and the Es/No.",processed,20250909_085220_20250909_175220,2025-09-09T08:52:20+00:00,2025-09-09T17:52:20+00:00,1.0,METEOSAT-11 (MSG-4),40732,3.425858453672694,LOW,WEATHER,2025-09-09T10:24:00+00:00,180.0,False,False,True,
+RFI_010,HERA,HERA,2025-09-15T14:01:00+00:00,possible_rfi,CEB 258 2025-09-15 14:01:37 HERA 1 lost frame reported,"Having a look at the Carrier Level and Es/No values on the 15/09/2025 HERA Pass, a Carrier Level and Es/No drop is observed at 14:01:39. See below details,
+
+•	Carrier Level:
+
+14:01:35	-83
+14:01:37	-83
+14:01:39	-91.6
+14:01:41	-82.7
+14:01:43	-83
+14:01:45	-83
+
+•	Es/No:
+
+14:01:35	2.38
+14:01:37	2.36
+14:01:39	1.33
+14:01:41	2.17
+14:01:43	2.29
+14:01:45	2.32
+
+It might be related to RFI.
+
+Hereafter the complete pass charts for the Carrier Level and the Es/No.",processed,20250915_101114_20250915_181114,2025-09-15T10:11:14+00:00,2025-09-15T18:11:14+00:00,1.0,ELEKTRO-L 2,41105,4.360542602869346,LOW,WEATHER,2025-09-15T14:03:59+00:00,179.0,False,False,True,
+RFI_011,SOLO,SOLO,2025-11-30T11:21:00+00:00,uncertain,"Terminal DOY Date & Time S/C Incident Description
+CEB 334 2025-11-30 11:21:40 SOLO 2 missing transfer frames
+station is nominal
+CEB 334 2025-11-30 12:06:32 SOLO 12:06:32 - 1 missing transfer frame.
+12:35:31 - 2 missing transfer frames.
+Station nominal but weather seems to be cloudy.","At the time of the first reported incident (11:21 UTC) a 0.2-dB drop in Es/N0 can be observed (see chart below), and also carrier level was a little bit unstable at that time (0.3-dB variation around nominal value of -50.3 dBm). But starting around 12:06 UTC, carrier level started to be more stable but Es/N0 to decrease for unknown reasons. Relative humidity remained at no-so-high levels (≈ 65%). 
+
+Regarding the antenna pointing, at the time of the first reported incident there were three GEO satellites with similar azimuth over CEB-1 Station than the antenna one, but differing quite a lot in elevation (see table below). Taking a look into the Sun as possible noise source, the object ephemeris was very different from the antenna pointing.
+
+Sat Long	Name	AZ (deg)	EL (deg)
+-67.6	AEHF-4 (USA 288)	251.9	11.5
+-67.1	SES-17	251.5	11.9
+-66.9	SES-10	251.4	12.0
+N/A	CEB-1 Station	251.4	61.1
+N/A	SUN	168.2	27.3
+
+So the reason for the missing frames is still under investigation. A further RFI study should be conducted in case this incident affected the S/C telemetry and data.",processed,20251130_095814_20251130_155814,2025-11-30T09:58:14+00:00,2025-11-30T15:58:14+00:00,0.0,,,,,,,,False,False,False,
+RFI_012,SOLO,SOLO,2025-12-30T04:22:00+00:00,uncertain,SOLO mission reports frames out of sequence for 1 s at incident time drop in es/no ratio is observed on charts.,"Charts were analysed for TTCP #1 and TTCP #2 and it was noticed that carrier level was increased during the Es/No drop, that might indicate an RFI.
+
+See below charts,
+
+Weather conditions over the Station were fine.",processed,20251230_040540_20251230_060546,2025-12-30T04:05:40+00:00,2025-12-30T06:05:46+00:00,4.0,CSG-2,51444,0.2030072155487353,HIGH,RESOURCE,2025-12-30T04:21:48+00:00,12.0,True,True,True,
