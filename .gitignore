@@ -10,3 +10,5 @@ venv/
 results_case2/
 cebreros_rfi/data/
 cebreros_rfi/validation/
+results_case2_benchmark/
+results_horizons_identification/
