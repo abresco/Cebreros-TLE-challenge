@@ -11,8 +11,7 @@ from typing import Dict
 import pandas as pd
 import requests
 
-from mission_names import normalize_mission_name
-
+from cebreros_rfi.src.mission_names import normalize_mission_name
 
 HORIZONS_API_URL = "https://ssd.jpl.nasa.gov/api/horizons.api"
 UTC_DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S"

@@ -5,13 +5,19 @@ Interactive Identification tool:
 - external candidates from local full ACTIVE catalog
 - candidate bands from SatNOGS
 - outputs to console and HTML
+
+Main ranking:
+- known-band candidates = only candidates with real X/Ka match for Cebreros
+Secondary ranking:
+- unknown-band candidates = candidates with no X/Ka match, including those with
+  frequencies found outside Cebreros bands.
 """
 
 import html
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List
+from typing import List, Tuple
 
 import numpy as np
 import pandas as pd
@@ -45,9 +51,10 @@ STATION_CONFIG = {
 DEFAULT_STEP_SIZE = "60s"
 PRESELECTION_SEP_DEG = 10.0
 FINAL_SEP_DEG = 5.0
-TOP_N_BAND_LOOKUP = 10
-TOP_N_OUTPUT = 20
+TOP_N_KNOWN_OUTPUT = 10
+TOP_N_UNKNOWN_OUTPUT = 10
 MAX_REASONABLE_RANGE_KM = 100000.0
+MAX_RF_LOOKUPS = 120
 
 
 @dataclass
@@ -82,11 +89,14 @@ class CandidateResult:
     target_el_deg: float
     satnogs_bands: List[str]
     satnogs_freqs_mhz: List[float]
+    all_satnogs_bands: List[str]
+    all_satnogs_freqs_mhz: List[float]
     band_match: str
     score: float
     satnogs_url: str
     lookup_status: str
-    satnogs_satellite_id: object
+    has_known_band: bool
+    manual_review_candidate: bool
 
 
 def parse_console_datetime(prompt_text: str) -> str:
@@ -112,10 +122,14 @@ def get_station_config(station_id: str) -> dict:
 
 def classify_band_match(candidate_bands: List[str], allowed_bands: set) -> str:
     normalized = set([str(item).upper() for item in candidate_bands if item])
-    if not normalized or normalized == {"UNKNOWN"}:
+    normalized = normalized.intersection({"X", "KA"})
+
+    if not normalized:
         return "UNKNOWN"
+
     if normalized.intersection(allowed_bands):
         return "MATCH"
+
     return "MISMATCH"
 
 
@@ -125,6 +139,21 @@ def compute_band_penalty(band_match: str) -> float:
     if band_match == "UNKNOWN":
         return 1.0
     return 5.0
+
+
+def has_known_band_info(
+    satnogs_bands: List[str],
+    satnogs_freqs_mhz: List[float],
+    lookup_status: str,
+) -> bool:
+    if lookup_status != "ok":
+        return False
+
+    normalized = set([str(item).upper() for item in satnogs_bands if item])
+    if not satnogs_freqs_mhz:
+        return False
+
+    return bool(normalized.intersection({"X", "KA"}))
 
 
 def preselect_candidates(
@@ -167,7 +196,6 @@ def preselect_candidates(
         if min_sep > PRESELECTION_SEP_DEG:
             continue
 
-        # Filter out obviously broken propagation results
         if not np.isfinite(min_range_km) or min_range_km > MAX_REASONABLE_RANGE_KM:
             continue
 
@@ -197,103 +225,143 @@ def preselect_candidates(
     return results
 
 
-def enrich_candidates_with_bands(
+def enrich_single_candidate(
+    item: CandidatePreselection,
+    allowed_bands: set,
+) -> CandidateResult:
+    satnogs_info = lookup_bands_by_norad(item.norad_cat_id)
+
+    satnogs_bands = satnogs_info.get("bands", ["UNKNOWN"])
+    satnogs_freqs_mhz = satnogs_info.get("frequencies_mhz", [])
+    all_satnogs_bands = satnogs_info.get("all_bands", ["UNKNOWN"])
+    all_satnogs_freqs_mhz = satnogs_info.get("all_frequencies_mhz", [])
+    lookup_status = satnogs_info.get("lookup_status", "unknown")
+
+    band_match = classify_band_match(satnogs_bands, allowed_bands)
+    known_band = has_known_band_info(
+        satnogs_bands=satnogs_bands,
+        satnogs_freqs_mhz=satnogs_freqs_mhz,
+        lookup_status=lookup_status,
+    )
+
+    score = (
+        compute_band_penalty(band_match)
+        + item.min_sep_deg
+        - 0.05 * item.close_samples
+    )
+
+    return CandidateResult(
+        object_name=item.object_name,
+        norad_cat_id=item.norad_cat_id,
+        groups=item.groups,
+        min_sep_deg=item.min_sep_deg,
+        closest_time_utc=item.closest_time_utc,
+        visible_samples=item.visible_samples,
+        close_samples=item.close_samples,
+        sat_az_deg=item.sat_az_deg,
+        sat_el_deg=item.sat_el_deg,
+        sat_range_km=item.sat_range_km,
+        target_az_deg=item.target_az_deg,
+        target_el_deg=item.target_el_deg,
+        satnogs_bands=satnogs_bands,
+        satnogs_freqs_mhz=satnogs_freqs_mhz,
+        all_satnogs_bands=all_satnogs_bands,
+        all_satnogs_freqs_mhz=all_satnogs_freqs_mhz,
+        band_match=band_match,
+        score=score,
+        satnogs_url=satnogs_info.get("satnogs_url"),
+        lookup_status=lookup_status,
+        has_known_band=known_band,
+        manual_review_candidate=not known_band,
+    )
+
+
+def build_rankings(
     preselected_results: List[CandidatePreselection],
     allowed_bands: set,
-) -> List[CandidateResult]:
-    enriched = []
+) -> Tuple[List[CandidateResult], List[CandidateResult], List[CandidateResult], int]:
+    all_results = []
+    known_results = []
+    unknown_results = []
+    lookups_done = 0
 
-    for item in preselected_results[:TOP_N_BAND_LOOKUP]:
-        satnogs_info = lookup_bands_by_norad(item.norad_cat_id)
-        satnogs_bands = satnogs_info.get("bands", ["UNKNOWN"])
-        satnogs_freqs_mhz = satnogs_info.get("frequencies_mhz", [])
-        band_match = classify_band_match(satnogs_bands, allowed_bands)
+    for item in preselected_results:
+        if lookups_done >= MAX_RF_LOOKUPS:
+            break
 
-        score = (
-            compute_band_penalty(band_match)
-            + item.min_sep_deg
-            - 0.05 * item.close_samples
-        )
+        candidate = enrich_single_candidate(item, allowed_bands)
+        all_results.append(candidate)
+        lookups_done += 1
 
-        enriched.append(
-            CandidateResult(
-                object_name=item.object_name,
-                norad_cat_id=item.norad_cat_id,
-                groups=item.groups,
-                min_sep_deg=item.min_sep_deg,
-                closest_time_utc=item.closest_time_utc,
-                visible_samples=item.visible_samples,
-                close_samples=item.close_samples,
-                sat_az_deg=item.sat_az_deg,
-                sat_el_deg=item.sat_el_deg,
-                sat_range_km=item.sat_range_km,
-                target_az_deg=item.target_az_deg,
-                target_el_deg=item.target_el_deg,
-                satnogs_bands=satnogs_bands,
-                satnogs_freqs_mhz=satnogs_freqs_mhz,
-                band_match=band_match,
-                score=score,
-                satnogs_url=satnogs_info.get("satnogs_url"),
-                lookup_status=satnogs_info.get("lookup_status", "unknown"),
-                satnogs_satellite_id=satnogs_info.get("satnogs_satellite_id"),
-            )
-        )
+        if candidate.has_known_band:
+            known_results.append(candidate)
+        else:
+            unknown_results.append(candidate)
 
-    enriched.sort(key=lambda item: (item.score, item.min_sep_deg, -item.close_samples, item.closest_time_utc))
-    return enriched
+        if (
+            len(known_results) >= TOP_N_KNOWN_OUTPUT
+            and len(unknown_results) >= TOP_N_UNKNOWN_OUTPUT
+        ):
+            break
+
+    all_results.sort(key=lambda item: (item.score, item.min_sep_deg, -item.close_samples, item.closest_time_utc))
+    known_results.sort(key=lambda item: (item.score, item.min_sep_deg, -item.close_samples, item.closest_time_utc))
+    unknown_results.sort(key=lambda item: (item.score, item.min_sep_deg, -item.close_samples, item.closest_time_utc))
+
+    return all_results, known_results, unknown_results, lookups_done
 
 
-def print_console_results(results: List[CandidateResult]):
+def print_result_block(title: str, results: List[CandidateResult], limit: int):
     print("\n----------------------------------")
-    print("Top candidates")
+    print(title)
     print("----------------------------------")
 
     if not results:
-        print("No candidates found after geometric preselection.")
+        print("None")
         return
 
-    for rank, item in enumerate(results[:TOP_N_OUTPUT], start=1):
-        freqs_text = ",".join("{0:.3f}".format(x) for x in item.satnogs_freqs_mhz[:6])
-        if not freqs_text:
-            freqs_text = "none"
+    for rank, item in enumerate(results[:limit], start=1):
+        ceb_freqs_text = ",".join("{0:.3f}".format(x) for x in item.satnogs_freqs_mhz[:6]) or "none"
+        all_freqs_text = ",".join("{0:.3f}".format(x) for x in item.all_satnogs_freqs_mhz[:6]) or "none"
 
         print(
-            "{0:02d}. {1} (NORAD {2}) | bands={3} | freqs_mhz={4} | match={5} | "
-            "min_sep={6:.3f} deg | closest={7} | lookup={8} | satnogs_id={9}".format(
+            "{0:02d}. {1} (NORAD {2}) | ceb_bands={3} | ceb_freqs_mhz={4} | "
+            "all_bands={5} | all_freqs_mhz={6} | match={7} | min_sep={8:.3f} deg | "
+            "closest={9} | lookup={10}".format(
                 rank,
                 item.object_name,
                 item.norad_cat_id,
                 ",".join(item.satnogs_bands),
-                freqs_text,
+                ceb_freqs_text,
+                ",".join(item.all_satnogs_bands),
+                all_freqs_text,
                 item.band_match,
                 item.min_sep_deg,
                 item.closest_time_utc.isoformat(),
                 item.lookup_status,
-                item.satnogs_satellite_id,
             )
         )
 
 
-def write_html_report(
-    output_path: Path,
-    station_id: str,
-    mission_id: str,
-    start_utc: str,
-    end_utc: str,
-    results: List[CandidateResult],
-):
-    rows = []
-    for rank, item in enumerate(results[:TOP_N_OUTPUT], start=1):
-        rows.append(
+def build_html_table(title: str, rows: List[CandidateResult], limit: int) -> str:
+    if not rows:
+        return "<h2>{0}</h2><p>None</p>".format(html.escape(title))
+
+    table_rows = []
+    for rank, item in enumerate(rows[:limit], start=1):
+        table_rows.append(
             """
             <tr>
                 <td>{rank}</td>
                 <td>{object_name}</td>
                 <td>{norad}</td>
-                <td>{bands}</td>
-                <td>{freqs}</td>
+                <td>{ceb_bands}</td>
+                <td>{ceb_freqs}</td>
+                <td>{all_bands}</td>
+                <td>{all_freqs}</td>
                 <td>{band_match}</td>
                 <td>{lookup_status}</td>
+                <td>{manual_review}</td>
                 <td>{min_sep:.3f}</td>
                 <td>{closest_time}</td>
                 <td>{sat_az:.3f}</td>
@@ -307,10 +375,13 @@ def write_html_report(
                 rank=rank,
                 object_name=html.escape(item.object_name),
                 norad=html.escape(item.norad_cat_id),
-                bands=html.escape(", ".join(item.satnogs_bands)),
-                freqs=html.escape(", ".join("{0:.3f}".format(x) for x in item.satnogs_freqs_mhz[:6])),
+                ceb_bands=html.escape(", ".join(item.satnogs_bands)),
+                ceb_freqs=html.escape(", ".join("{0:.3f}".format(x) for x in item.satnogs_freqs_mhz[:10])),
+                all_bands=html.escape(", ".join(item.all_satnogs_bands)),
+                all_freqs=html.escape(", ".join("{0:.3f}".format(x) for x in item.all_satnogs_freqs_mhz[:10])),
                 band_match=html.escape(item.band_match),
                 lookup_status=html.escape(item.lookup_status),
+                manual_review=html.escape(str(item.manual_review_candidate)),
                 min_sep=item.min_sep_deg,
                 closest_time=html.escape(item.closest_time_utc.isoformat()),
                 sat_az=item.sat_az_deg,
@@ -322,6 +393,56 @@ def write_html_report(
             )
         )
 
+    return """
+    <h2>{title}</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Rank</th>
+          <th>Object</th>
+          <th>NORAD</th>
+          <th>CEB Bands</th>
+          <th>CEB Freqs (MHz)</th>
+          <th>All Bands</th>
+          <th>All Freqs (MHz)</th>
+          <th>Band Match</th>
+          <th>Lookup Status</th>
+          <th>Manual Review</th>
+          <th>Min Sep (deg)</th>
+          <th>Closest Time UTC</th>
+          <th>Sat AZ</th>
+          <th>Sat EL</th>
+          <th>Target AZ</th>
+          <th>Target EL</th>
+          <th>Range (km)</th>
+          <th>Groups</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows}
+      </tbody>
+    </table>
+    """.format(
+        title=html.escape(title),
+        rows="\n".join(table_rows),
+    )
+
+
+def write_html_report(
+    output_path: Path,
+    station_id: str,
+    mission_id: str,
+    start_utc: str,
+    end_utc: str,
+    all_results: List[CandidateResult],
+    known_results: List[CandidateResult],
+    unknown_results: List[CandidateResult],
+    lookups_done: int,
+):
+    known_table = build_html_table("Known-band candidates", known_results, TOP_N_KNOWN_OUTPUT)
+    unknown_table = build_html_table("Unknown-band candidates", unknown_results, TOP_N_UNKNOWN_OUTPUT)
+    all_table = build_html_table("All checked candidates", all_results, max(TOP_N_KNOWN_OUTPUT, TOP_N_UNKNOWN_OUTPUT))
+
     html_text = """
     <!DOCTYPE html>
     <html lang="en">
@@ -330,7 +451,7 @@ def write_html_report(
       <title>Identification Report</title>
       <style>
         body {{ font-family: Arial, sans-serif; margin: 24px; }}
-        table {{ border-collapse: collapse; width: 100%; }}
+        table {{ border-collapse: collapse; width: 100%; margin-bottom: 28px; }}
         th, td {{ border: 1px solid #ccc; padding: 6px 8px; font-size: 13px; text-align: left; }}
         th {{ background: #f2f2f2; }}
       </style>
@@ -340,32 +461,13 @@ def write_html_report(
       <p><strong>Station ID:</strong> {station_id}</p>
       <p><strong>Mission ID:</strong> {mission_id}</p>
       <p><strong>Time slot:</strong> {start_utc} to {end_utc}</p>
-      <p><strong>Candidates found:</strong> {candidate_count}</p>
+      <p><strong>SatNOGS lookups performed:</strong> {lookups_done}</p>
+      <p><strong>Known-band candidates:</strong> {known_count}</p>
+      <p><strong>Unknown-band candidates:</strong> {unknown_count}</p>
 
-      <table>
-        <thead>
-          <tr>
-            <th>Rank</th>
-            <th>Object</th>
-            <th>NORAD</th>
-            <th>Bands</th>
-            <th>Freqs (MHz)</th>
-            <th>Band Match</th>
-            <th>Lookup Status</th>
-            <th>Min Sep (deg)</th>
-            <th>Closest Time UTC</th>
-            <th>Sat AZ</th>
-            <th>Sat EL</th>
-            <th>Target AZ</th>
-            <th>Target EL</th>
-            <th>Range (km)</th>
-            <th>Groups</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows}
-        </tbody>
-      </table>
+      {known_table}
+      {unknown_table}
+      {all_table}
     </body>
     </html>
     """.format(
@@ -373,8 +475,12 @@ def write_html_report(
         mission_id=html.escape(mission_id),
         start_utc=html.escape(start_utc),
         end_utc=html.escape(end_utc),
-        candidate_count=len(results),
-        rows="\n".join(rows),
+        lookups_done=lookups_done,
+        known_count=len(known_results),
+        unknown_count=len(unknown_results),
+        known_table=known_table,
+        unknown_table=unknown_table,
+        all_table=all_table,
     )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -428,13 +534,15 @@ def main():
     )
     print("Geometrically suspicious candidates: {0}".format(len(preselected)))
 
-    print("Running SatNOGS band enrichment on top {0} candidates...".format(TOP_N_BAND_LOOKUP))
-    results = enrich_candidates_with_bands(
+    print("Building RF-aware rankings...")
+    all_results, known_results, unknown_results, lookups_done = build_rankings(
         preselected_results=preselected,
         allowed_bands=allowed_bands,
     )
 
-    print_console_results(results)
+    print_result_block("Known-band candidates", known_results, TOP_N_KNOWN_OUTPUT)
+    print_result_block("Unknown-band candidates", unknown_results, TOP_N_UNKNOWN_OUTPUT)
+    print_result_block("All checked candidates", all_results, max(TOP_N_KNOWN_OUTPUT, TOP_N_UNKNOWN_OUTPUT))
 
     output_dir = Path("results_horizons_identification")
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -452,7 +560,10 @@ def main():
         mission_id=mission_id,
         start_utc=start_utc,
         end_utc=end_utc,
-        results=results,
+        all_results=all_results,
+        known_results=known_results,
+        unknown_results=unknown_results,
+        lookups_done=lookups_done,
     )
 
     print("\nHTML report written to: {0}".format(html_path.resolve()))
