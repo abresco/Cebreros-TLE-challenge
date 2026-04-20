@@ -70,6 +70,9 @@ def api_get_json(url: str, params: Optional[dict] = None):
 
 
 def normalize_freq_to_mhz(raw_value) -> Optional[float]:
+    """
+    SatNOGS usually returns Hz, but keep already-MHz values untouched.
+    """
     if raw_value in (None, "", 0):
         return None
 
@@ -151,6 +154,9 @@ def filter_ceb_relevant_frequencies(freqs_mhz: List[float]) -> List[float]:
 
 
 def lookup_bands_by_norad(norad_cat_id: str, force_refresh: bool = False) -> dict:
+    """
+    Return cached SatNOGS RF metadata for one NORAD catalog id.
+    """
     norad = str(norad_cat_id or "").strip()
     if not norad:
         return {

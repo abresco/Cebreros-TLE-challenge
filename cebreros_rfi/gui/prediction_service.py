@@ -6,51 +6,42 @@ Prediction service for:
 
 Prediction v1:
 - geometry-first
-- frequency-aware
+- persistence-aware
 - history-assisted
 - outputs a heuristic probability (0-100)
+
+Important:
+Prediction uses both:
+1. mission-specific history (victim mission + interferer NORAD)
+2. global history (interferer NORAD)
+
+Mission-specific history has priority.
+
+Probability no longer includes a direct RF metadata bonus.
+RF / lookup information is still exposed as context in the outputs.
 """
 
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Tuple
 import xml.etree.ElementTree as ET
 
-import numpy as np
-import pandas as pd
-from skyfield.api import load
-
-from cebreros_rfi.src.case2_rfi_celestrak import (
-    angular_separation_deg,
-    build_station,
-)
-from cebreros_rfi.src.horizons_target_track import fetch_target_track
-from cebreros_rfi.src.local_candidate_catalog import (
-    get_local_catalog_metadata,
-    load_local_candidate_catalog,
+from cebreros_rfi.src.core.candidate_helpers import preselect_geometric_candidates
+from cebreros_rfi.src.core.operational_context import (
+    DEFAULT_STEP_SIZE,
+    FINAL_SEP_DEG,
+    MAX_REASONABLE_RANGE_KM,
+    PRESELECTION_SEP_DEG,
+    build_operational_context,
 )
 from cebreros_rfi.src.mission_names import normalize_mission_name
 from cebreros_rfi.src.satnogs_band_lookup import lookup_bands_by_norad
-from cebreros_rfi.src.feedback_db import get_candidate_history_stats
-
-
-UTC = timezone.utc
-
-STATION_CONFIG = {
-    "CEB": {
-        "lat_deg": 40.4526889,
-        "lon_deg": -4.36755,
-        "elevation_m": 794.0,
-        "allowed_bands": {"X", "KA"},
-    }
-}
-
-DEFAULT_STEP_SIZE = "60s"
-PRESELECTION_SEP_DEG = 10.0
-FINAL_SEP_DEG = 5.0
+from cebreros_rfi.src.feedback_db import (
+    HistoryStats,
+    get_candidate_history_stats,
+    get_candidate_history_stats_for_mission,
+)
 TOP_N_OUTPUT = 20
-MAX_REASONABLE_RANGE_KM = 100000.0
-MAX_RF_LOOKUPS = 120
+MAX_RF_LOOKUPS = 20
 
 
 class PredictionServiceError(RuntimeError):
@@ -69,145 +60,139 @@ def probability_label(probability: float) -> str:
     return "LOW"
 
 
-def compute_probability(
-    min_sep_deg: float,
-    close_samples: int,
-    lookup_status: str,
-    history_stats: Dict,
-) -> float:
-    geometry_component = max(0.0, 70.0 - 8.0 * float(min_sep_deg))
-    duration_component = min(15.0, float(close_samples) * 1.5)
-
-    lookup_status = str(lookup_status or "").strip().lower()
-    if lookup_status == "ok":
-        frequency_component = 15.0
-    elif lookup_status == "no_ceb_band_match":
-        frequency_component = 8.0
-    elif lookup_status == "no_frequency_found":
-        frequency_component = 4.0
-    elif lookup_status == "lookup_error":
-        frequency_component = 1.0
-    else:
-        frequency_component = 0.0
-
+def compute_history_component(history_stats: HistoryStats) -> float:
     confirmed = int(history_stats.get("confirmed", 0))
     rejected = int(history_stats.get("rejected", 0))
     uncertain = int(history_stats.get("uncertain", 0))
 
-    history_component = min(18.0, confirmed * 4.0) - min(12.0, rejected * 3.0) + min(4.0, uncertain * 1.0)
-
-    probability = geometry_component + duration_component + frequency_component + history_component
-    return round(clamp(probability, 0.0, 100.0), 1)
-
-
-def compute_possible_rfi_slot(close_indices: np.ndarray, timestamps: List[pd.Timestamp], closest_idx: int):
-    if close_indices.size == 0:
-        instant = timestamps[closest_idx].to_pydatetime().isoformat()
-        return instant, instant
-
-    start_idx = int(close_indices.min())
-    end_idx = int(close_indices.max())
     return (
-        timestamps[start_idx].to_pydatetime().isoformat(),
-        timestamps[end_idx].to_pydatetime().isoformat(),
+        min(20.0, confirmed * 4.0)
+        - min(12.0, rejected * 3.0)
+        + min(4.0, uncertain * 1.0)
     )
 
 
-def preselect_candidates(target_track_df: pd.DataFrame, satellites, station) -> List[dict]:
-    ts = load.timescale()
-
-    timestamps = list(target_track_df["UTC"])
-    times = ts.from_datetimes([value.to_pydatetime() for value in timestamps])
-
-    target_az = np.array(target_track_df["AZ_target_deg"].values, dtype=float)
-    target_el = np.array(target_track_df["EL_target_deg"].values, dtype=float)
-
-    results = []
-
-    for satellite, groups, raw_row in satellites:
-        difference = satellite - station
-        topocentric = difference.at(times)
-        alt, az, distance = topocentric.altaz()
-
-        sat_el = np.asarray(alt.degrees, dtype=float)
-        sat_az = np.asarray(az.degrees, dtype=float)
-        sat_range_km = np.asarray(distance.km, dtype=float)
-
-        visible_mask = sat_el > 0.0
-        if not np.any(visible_mask):
-            continue
-
-        separation = angular_separation_deg(target_az, target_el, sat_az, sat_el)
-        valid_mask = visible_mask & np.isfinite(separation)
-        if not np.any(valid_mask):
-            continue
-
-        min_idx = int(np.argmin(np.where(valid_mask, separation, np.inf)))
-        min_sep = float(separation[min_idx])
-        min_range_km = float(sat_range_km[min_idx])
-
-        if min_sep > PRESELECTION_SEP_DEG:
-            continue
-
-        if not np.isfinite(min_range_km) or min_range_km > MAX_REASONABLE_RANGE_KM:
-            continue
-
-        close_mask = valid_mask & (separation <= FINAL_SEP_DEG)
-        close_indices = np.where(close_mask)[0]
-
-        close_samples = int(np.count_nonzero(close_mask))
-        visible_samples = int(np.count_nonzero(visible_mask))
-        closest_time_utc = timestamps[min_idx].to_pydatetime().isoformat()
-        slot_start_utc, slot_end_utc = compute_possible_rfi_slot(close_indices, timestamps, min_idx)
-
-        results.append(
-            {
-                "object_name": str(raw_row.get("OBJECT_NAME", "")).strip() or "UNKNOWN",
-                "norad_cat_id": str(raw_row.get("NORAD_CAT_ID", "")).strip(),
-                "groups": ",".join(groups),
-                "min_sep_deg": min_sep,
-                "closest_time_utc": closest_time_utc,
-                "visible_samples": visible_samples,
-                "close_samples": close_samples,
-                "sat_az_deg": float(sat_az[min_idx]),
-                "sat_el_deg": float(sat_el[min_idx]),
-                "sat_range_km": min_range_km,
-                "target_az_deg": float(target_az[min_idx]),
-                "target_el_deg": float(target_el[min_idx]),
-                "possible_rfi_start_utc": slot_start_utc,
-                "possible_rfi_end_utc": slot_end_utc,
-            }
-        )
-
-    results.sort(key=lambda item: (item["min_sep_deg"], -item["close_samples"], item["closest_time_utc"]))
-    return results
+def select_effective_history(
+    mission_history_stats: HistoryStats,
+    global_history_stats: HistoryStats,
+) -> Tuple[str, HistoryStats]:
+    """
+    Use mission history when available, otherwise fall back to global history.
+    """
+    if int(mission_history_stats.get("total", 0)) > 0:
+        return "mission", mission_history_stats
+    if int(global_history_stats.get("total", 0)) > 0:
+        return "global", global_history_stats
+    return "none", {
+        "confirmed": 0,
+        "rejected": 0,
+        "uncertain": 0,
+        "total": 0,
+    }
 
 
-def enrich_prediction_candidate(item: dict) -> dict:
+def compute_probability(
+    min_sep_deg: float,
+    close_samples: int,
+    mission_history_stats: HistoryStats,
+    global_history_stats: HistoryStats,
+) -> float:
+    """
+    Probability model rationale:
+
+    1. Geometry:
+       Smaller separation should strongly increase probability, but not dominate everything.
+       We use:
+           geometry_component = max(0, 50 - 5 * min_sep_deg)
+
+       Examples:
+       - 0.5 deg -> 47.5
+       - 1.0 deg -> 45.0
+       - 2.0 deg -> 40.0
+       - 5.0 deg -> 25.0
+       - 10.0 deg -> 0.0
+
+    2. Persistence / duration:
+       Repeated close samples should matter a lot more than before.
+       We use:
+           duration_component = min(30, 3 * close_samples)
+
+       Examples:
+       - 1 sample  -> 3
+       - 5 samples -> 15
+       - 10 samples -> 30
+
+    3. History:
+       Mission-specific history has priority.
+       If no mission-specific history exists, fall back to 60% of the global-history signal.
+
+    No direct RF bonus is included in probability.
+    RF metadata remains visible in outputs, but not as score inflation.
+    """
+    geometry_component = max(0.0, 50.0 - 5.0 * float(min_sep_deg))
+    duration_component = min(30.0, float(close_samples) * 3.0)
+
+    mission_total = int(mission_history_stats.get("total", 0))
+    global_total = int(global_history_stats.get("total", 0))
+
+    if mission_total > 0:
+        history_component = compute_history_component(mission_history_stats)
+    elif global_total > 0:
+        history_component = 0.6 * compute_history_component(global_history_stats)
+    else:
+        history_component = 0.0
+
+    probability = geometry_component + duration_component + history_component
+    return round(clamp(probability, 0.0, 100.0), 1)
+
+
+def enrich_prediction_candidate(item: dict, victim_mission_id: str) -> dict:
     satnogs_info = lookup_bands_by_norad(item["norad_cat_id"])
-    history_stats = get_candidate_history_stats(item["norad_cat_id"])
 
-    lookup_status = satnogs_info.get("lookup_status", "unknown")
+    mission_history_stats = get_candidate_history_stats_for_mission(
+        mission_id=victim_mission_id,
+        norad_cat_id=item["norad_cat_id"],
+    )
+    global_history_stats = get_candidate_history_stats(item["norad_cat_id"])
+
     probability = compute_probability(
         min_sep_deg=item["min_sep_deg"],
         close_samples=item["close_samples"],
-        lookup_status=lookup_status,
-        history_stats=history_stats,
+        mission_history_stats=mission_history_stats,
+        global_history_stats=global_history_stats,
+    )
+
+    history_source, effective_history = select_effective_history(
+        mission_history_stats=mission_history_stats,
+        global_history_stats=global_history_stats,
     )
 
     enriched = dict(item)
     enriched.update(
         {
-            "lookup_status": lookup_status,
+            "victim_mission_id": victim_mission_id,
+            "lookup_status": satnogs_info.get("lookup_status", "unknown"),
             "all_satnogs_freqs_mhz": satnogs_info.get("all_frequencies_mhz", []),
             "all_satnogs_bands": satnogs_info.get("all_bands", ["UNKNOWN"]),
             "cebreros_freqs_mhz": satnogs_info.get("frequencies_mhz", []),
             "cebreros_bands": satnogs_info.get("bands", ["UNKNOWN"]),
             "probability": probability,
             "probability_label": probability_label(probability),
-            "history_confirmed": history_stats.get("confirmed", 0),
-            "history_rejected": history_stats.get("rejected", 0),
-            "history_uncertain": history_stats.get("uncertain", 0),
+            # Flat aliases keep the consumer contract simple while the detailed
+            # mission/global counters remain available for inspection.
+            "history_source": history_source,
+            "history_confirmed": effective_history.get("confirmed", 0),
+            "history_rejected": effective_history.get("rejected", 0),
+            "history_uncertain": effective_history.get("uncertain", 0),
+            "history_total": effective_history.get("total", 0),
+            "mission_history_confirmed": mission_history_stats.get("confirmed", 0),
+            "mission_history_rejected": mission_history_stats.get("rejected", 0),
+            "mission_history_uncertain": mission_history_stats.get("uncertain", 0),
+            "mission_history_total": mission_history_stats.get("total", 0),
+            "global_history_confirmed": global_history_stats.get("confirmed", 0),
+            "global_history_rejected": global_history_stats.get("rejected", 0),
+            "global_history_uncertain": global_history_stats.get("uncertain", 0),
+            "global_history_total": global_history_stats.get("total", 0),
         }
     )
     return enriched
@@ -219,37 +204,26 @@ def run_prediction_interval(
     start_utc: str,
     end_utc: str,
 ) -> Dict:
-    station_id = str(station_id).strip().upper()
-    mission_id = normalize_mission_name(mission_id)
-
-    if station_id not in STATION_CONFIG:
-        raise PredictionServiceError("Unsupported station ID: {0}".format(station_id))
-
-    catalog_meta = get_local_catalog_metadata()
-    if not catalog_meta["exists"]:
-        raise PredictionServiceError(
-            "Local ACTIVE catalog not found. Run update_candidate_catalog.py first."
+    try:
+        context = build_operational_context(
+            station_id=station_id,
+            mission_id=mission_id,
+            start_utc=start_utc,
+            end_utc=end_utc,
+            step_size=DEFAULT_STEP_SIZE,
         )
+    except Exception as exc:
+        raise PredictionServiceError(str(exc))
 
-    target_track_df = fetch_target_track(
-        mission_id=mission_id,
-        station_id=station_id,
-        start_time_utc=start_utc,
-        stop_time_utc=end_utc,
-        step_size=DEFAULT_STEP_SIZE,
+    preselected = preselect_geometric_candidates(
+        target_track_df=context.target_track_df,
+        satellites=context.satellites,
+        station=context.station,
+        preselection_sep_deg=PRESELECTION_SEP_DEG,
+        final_sep_deg=FINAL_SEP_DEG,
+        max_reasonable_range_km=MAX_REASONABLE_RANGE_KM,
+        include_possible_rfi_slot=True,
     )
-
-    ts = load.timescale()
-    satellites = load_local_candidate_catalog(ts)
-
-    station_cfg = STATION_CONFIG[station_id]
-    station = build_station(
-        station_cfg["lat_deg"],
-        station_cfg["lon_deg"],
-        station_cfg["elevation_m"],
-    )
-
-    preselected = preselect_candidates(target_track_df, satellites, station)
 
     results = []
     lookups_done = 0
@@ -257,7 +231,7 @@ def run_prediction_interval(
     for item in preselected:
         if lookups_done >= MAX_RF_LOOKUPS:
             break
-        results.append(enrich_prediction_candidate(item))
+        results.append(enrich_prediction_candidate(item, victim_mission_id=context.mission_id))
         lookups_done += 1
 
     results.sort(
@@ -270,11 +244,11 @@ def run_prediction_interval(
     )
 
     return {
-        "station_id": station_id,
-        "mission_id": mission_id,
+        "station_id": context.station_id,
+        "mission_id": context.mission_id,
         "start_utc": start_utc,
         "end_utc": end_utc,
-        "catalog_meta": catalog_meta,
+        "catalog_meta": context.catalog_meta,
         "preselected_count": len(preselected),
         "lookups_done": lookups_done,
         "results": results[:TOP_N_OUTPUT],
@@ -282,16 +256,6 @@ def run_prediction_interval(
 
 
 def parse_schedule_xml(xml_path: str) -> List[Dict]:
-    """
-    Best-effort parser prepared for future ESA Scheduling XML integration.
-
-    Expected output:
-    [
-        {"mission_id": "...", "start_utc": "...", "end_utc": "..."}
-    ]
-
-    This parser tries common tag/attribute names and can be adapted later.
-    """
     xml_path = Path(xml_path)
     if not xml_path.exists():
         raise PredictionServiceError("XML file not found: {0}".format(xml_path))

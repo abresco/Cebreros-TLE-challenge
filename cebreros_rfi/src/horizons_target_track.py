@@ -49,6 +49,9 @@ class HorizonsError(RuntimeError):
 
 
 def get_station(station_id: str) -> GroundStation:
+    """
+    Resolve a supported station id into the coordinates expected by Horizons.
+    """
     station_key = str(station_id or "").strip().upper()
     if station_key not in STATIONS:
         raise HorizonsError("Unsupported station ID: {0}".format(station_id))
@@ -56,6 +59,9 @@ def get_station(station_id: str) -> GroundStation:
 
 
 def get_mission_command(mission_id: str) -> str:
+    """
+    Convert the project mission id into the Horizons target command.
+    """
     mission = normalize_mission_name(mission_id)
     if mission not in MISSION_COMMANDS:
         raise HorizonsError("Unsupported mission ID for Horizons: {0}".format(mission_id))
@@ -71,6 +77,9 @@ def normalize_step_size_for_horizons(
     stop_time_utc: str,
     step_size: str,
 ) -> str:
+    """
+    Accept project-friendly step sizes and map them to the Horizons API format.
+    """
     step_size = step_size.strip().lower()
 
     if step_size.isdigit():
@@ -148,6 +157,9 @@ def build_horizons_params(
 
 
 def query_horizons(params):
+    """
+    Execute the Horizons request and return the raw result block.
+    """
     response = requests.get(HORIZONS_API_URL, params=params, timeout=180)
     response.raise_for_status()
     data = response.json()
@@ -175,6 +187,9 @@ def extract_soe_block(raw_result: str) -> str:
 
 
 def parse_horizons_csv_block(csv_block: str) -> pd.DataFrame:
+    """
+    Parse the $$SOE/$$EOE CSV payload into the AZ/EL dataframe used downstream.
+    """
     rows = []
 
     for line in csv_block.splitlines():
@@ -217,6 +232,9 @@ def fetch_target_track(
     stop_time_utc: str,
     step_size: str = "30s",
 ) -> pd.DataFrame:
+    """
+    End-to-end Horizons fetch for one mission pass interval.
+    """
     station = get_station(station_id)
     mission_command = get_mission_command(mission_id)
 

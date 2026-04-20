@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+"""
+Streamlit entrypoint for identification and prediction workflows.
+"""
+
 import sys
 import tempfile
 from pathlib import Path
@@ -35,34 +39,110 @@ st.set_page_config(
 st.title("Cebreros RFI Identification & Prediction Tool")
 st.caption("ESA demo mock-up — Identification active, Prediction v1 active")
 
+with st.expander("Help / Method"):
+    st.markdown(
+        """
+        ### Overview
+
+        This application supports two workflows:
+
+        **Identification**
+        - Input: station, ESA mission, past UTC interval
+        - Output: ranked candidate interferers crossing the victim mission track
+
+        **Prediction**
+        - Input: station, ESA mission, future UTC interval
+        - Output: ranked future candidates, probability, and possible RFI slots
+
+        ### Data sources
+
+        - **JPL Horizons**: target ESA mission track
+        - **CelesTrak ACTIVE**: external satellite candidate catalog
+        - **SatNOGS**: contextual RF metadata when available
+        - **SQLite**: local feedback database
+
+        ### Identification method
+
+        The tool:
+        1. retrieves the victim mission AZ/EL track from Horizons
+        2. propagates external satellites from the local ACTIVE catalog
+        3. computes angular separation between victim and candidate tracks
+        4. ranks candidates by geometric proximity
+        5. shows contextual frequency metadata when available
+
+        ### Prediction method
+
+        Prediction is currently based on:
+        - minimum angular separation
+        - persistence across close samples
+        - historical recurrence from user feedback
+
+        RF metadata is shown as context, but it does not directly increase probability.
+
+        ### Probability meaning
+
+        Probability is currently a heuristic score from 0 to 100.
+        It should be interpreted as a ranked risk indicator, not as a calibrated physical probability.
+
+        - **HIGH**: strongest concern
+        - **MEDIUM**: moderate concern
+        - **LOW**: weaker concern
+
+        ### Feedback database
+
+        The feedback form stores:
+        - victim ESA mission
+        - candidate NORAD ID
+        - user label (`confirmed`, `rejected`, `uncertain`)
+
+        Prediction reuses this history, prioritizing:
+        1. mission-specific victim/interferer history
+        2. global interferer history
+
+        ### Current status
+
+        - Identification is operational
+        - Prediction v1 is operational
+        - XML schedule support is prepared and may be adapted once the final ESA Scheduling XML structure is confirmed
+        """
+    )
+
+STATION_OPTIONS = ["CEB"]
+MISSION_OPTIONS = ["HERA", "JUICE", "SOLO", "BEPI", "MEX1", "EUCL"]
+FEEDBACK_LABEL_OPTIONS = ["confirmed", "rejected", "uncertain"]
+LIST_LIKE_COLUMNS = [
+    "satnogs_freqs_mhz",
+    "all_satnogs_freqs_mhz",
+    "all_satnogs_bands",
+    "cebreros_freqs_mhz",
+    "cebreros_bands",
+]
+
+
+def format_list_like_value(value):
+    if not isinstance(value, list):
+        return value
+    if not value:
+        return ""
+
+    formatted = []
+    for item in value:
+        if isinstance(item, float):
+            formatted.append("{0:.3f}".format(item))
+        else:
+            formatted.append(str(item))
+    return ", ".join(formatted)
+
 
 def dataframe_for_display(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Convert list-heavy API fields into compact strings for the Streamlit tables.
+    """
     df = df.copy()
 
-    list_like_columns = [
-        "satnogs_freqs_mhz",
-        "all_satnogs_freqs_mhz",
-        "all_satnogs_bands",
-        "cebreros_freqs_mhz",
-        "cebreros_bands",
-    ]
-
-    for column in list_like_columns:
+    for column in LIST_LIKE_COLUMNS:
         if column in df.columns:
-            def _format_value(value):
-                if isinstance(value, list):
-                    if not value:
-                        return ""
-                    formatted = []
-                    for item in value:
-                        if isinstance(item, float):
-                            formatted.append("{0:.3f}".format(item))
-                        else:
-                            formatted.append(str(item))
-                    return ", ".join(formatted)
-                return value
-
-            df[column] = df[column].apply(_format_value)
+            df[column] = df[column].apply(format_list_like_value)
 
     return df
 
@@ -77,10 +157,10 @@ with tab_identification:
         col1, col2 = st.columns(2)
 
         with col1:
-            station_id = st.selectbox("Station ID", ["CEB"], index=0, key="id_station")
+            station_id = st.selectbox("Station ID", STATION_OPTIONS, index=0, key="id_station")
             mission_id = st.selectbox(
                 "Mission ID",
-                ["HERA", "JUICE", "SOLO", "BEPI", "MEX1", "EUCL"],
+                MISSION_OPTIONS,
                 index=1,
                 key="id_mission",
             )
@@ -218,7 +298,7 @@ with tab_identification:
 
             with st.form("feedback_form"):
                 selected_key = st.selectbox("Candidate", list(candidate_options.keys()))
-                selected_label = st.selectbox("User label", ["confirmed", "rejected", "uncertain"])
+                selected_label = st.selectbox("User label", FEEDBACK_LABEL_OPTIONS)
                 notes = st.text_input("Notes", value="")
                 save_feedback = st.form_submit_button("Save Feedback", use_container_width=True)
 
@@ -255,10 +335,10 @@ with tab_prediction:
             col1, col2 = st.columns(2)
 
             with col1:
-                pred_station_id = st.selectbox("Station ID", ["CEB"], index=0, key="pred_station")
+                pred_station_id = st.selectbox("Station ID", STATION_OPTIONS, index=0, key="pred_station")
                 pred_mission_id = st.selectbox(
                     "Mission ID",
-                    ["HERA", "JUICE", "SOLO", "BEPI", "MEX1", "EUCL"],
+                    MISSION_OPTIONS,
                     index=1,
                     key="pred_mission",
                 )

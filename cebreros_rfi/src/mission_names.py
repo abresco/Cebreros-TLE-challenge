@@ -1,3 +1,7 @@
+"""
+Mission name normalization helpers shared across CLI and GUI entrypoints.
+"""
+
 from pathlib import Path
 
 
@@ -29,18 +33,24 @@ MISSION_DIRECTORY_CANDIDATES = {
 
 
 def normalize_mission_name(value):
-    # Convert user input or folder names to the canonical mission name.
+    """
+    Convert user input or folder names to the canonical mission name.
+    """
     mission = str(value or "").strip().upper()
     return MISSION_ALIASES.get(mission, mission)
 
 
 def accepted_mission_names_text():
-    # Return the accepted mission names in a user-friendly format.
+    """
+    Return the accepted mission names in a user-friendly format.
+    """
     return "HERA, JUICE/JUIC, SOLO, BEPI, MEX1/MEX, EUCL"
 
 
 def resolve_mission_dir(station_root, mission_value):
-    # Find the first existing mission folder that matches the input name.
+    """
+    Find the first existing mission folder that matches the input name.
+    """
     station_root = Path(station_root)
     mission_input = str(mission_value or "").strip().upper()
     canonical = normalize_mission_name(mission_input)

@@ -17,44 +17,56 @@ class LocalCatalogError(RuntimeError):
     pass
 
 
+def _build_missing_catalog_metadata(catalog_path: Path) -> dict:
+    return {
+        "exists": False,
+        "path": catalog_path,
+        "count": 0,
+        "fetched_at_utc": None,
+        "age_hours": None,
+    }
+
+
+def _compute_age_hours(fetched_at_raw):
+    if not fetched_at_raw:
+        return None
+
+    try:
+        fetched_at_dt = datetime.fromisoformat(fetched_at_raw.replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+    now_utc = datetime.now(timezone.utc)
+    return (now_utc - fetched_at_dt).total_seconds() / 3600.0
+
+
 def get_local_catalog_metadata(catalog_path=None):
+    """
+    Return lightweight metadata without constructing Skyfield objects.
+    """
     catalog_path = Path(catalog_path or LOCAL_CATALOG_PATH)
 
     if not catalog_path.exists():
-        return {
-            "exists": False,
-            "path": catalog_path,
-            "count": 0,
-            "fetched_at_utc": None,
-            "age_hours": None,
-        }
+        return _build_missing_catalog_metadata(catalog_path)
 
     with catalog_path.open("r", encoding="utf-8") as handle:
         payload = json.load(handle)
 
     fetched_at_raw = payload.get("fetched_at_utc")
-    fetched_at_dt = None
-    age_hours = None
-
-    if fetched_at_raw:
-        try:
-            fetched_at_dt = datetime.fromisoformat(fetched_at_raw.replace("Z", "+00:00"))
-            now_utc = datetime.now(timezone.utc)
-            age_hours = (now_utc - fetched_at_dt).total_seconds() / 3600.0
-        except Exception:
-            fetched_at_dt = None
-            age_hours = None
 
     return {
         "exists": True,
         "path": catalog_path,
         "count": payload.get("count", 0),
         "fetched_at_utc": fetched_at_raw,
-        "age_hours": age_hours,
+        "age_hours": _compute_age_hours(fetched_at_raw),
     }
 
 
 def load_local_candidate_catalog(ts, catalog_path=None):
+    """
+    Load the cached catalog and convert unique NORAD rows into Skyfield objects.
+    """
     catalog_path = Path(catalog_path or LOCAL_CATALOG_PATH)
 
     if not catalog_path.exists():

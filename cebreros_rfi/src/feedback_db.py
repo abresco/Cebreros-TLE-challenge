@@ -7,23 +7,39 @@ import json
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict
+from typing import Any, Dict, Iterable, Mapping, Optional, Union
 
 
 DB_PATH = Path("cebreros_rfi/data/db/rfi_feedback.sqlite3")
+DbPath = Optional[Union[str, Path]]
+CandidatePayload = Mapping[str, Any]
+HistoryStats = Dict[str, int]
 
 
-def ensure_db_dir():
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+def resolve_db_path(db_path: DbPath = None) -> Path:
+    return Path(db_path or DB_PATH)
 
 
-def get_connection(db_path=None):
-    ensure_db_dir()
-    path = str(Path(db_path or DB_PATH))
+def ensure_db_dir(db_path: DbPath = None):
+    """
+    Create the SQLite parent directory on demand.
+    """
+    resolve_db_path(db_path).parent.mkdir(parents=True, exist_ok=True)
+
+
+def get_connection(db_path: DbPath = None):
+    """
+    Open a connection to the feedback database, creating directories if needed.
+    """
+    ensure_db_dir(db_path)
+    path = str(resolve_db_path(db_path))
     return sqlite3.connect(path)
 
 
-def init_db(db_path=None):
+def init_db(db_path: DbPath = None):
+    """
+    Ensure the feedback table and lookup indexes exist.
+    """
     with get_connection(db_path) as conn:
         conn.execute(
             """
@@ -60,6 +76,12 @@ def init_db(db_path=None):
             ON identification_feedback (mission_id)
             """
         )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_feedback_mission_norad
+            ON identification_feedback (mission_id, norad_cat_id)
+            """
+        )
 
 
 def record_identification_feedback(
@@ -69,11 +91,11 @@ def record_identification_feedback(
     pass_end_utc: str,
     rfi_start_utc: str,
     rfi_end_utc: str,
-    candidate: Dict,
+    candidate: CandidatePayload,
     user_label: str,
     probability: float = None,
     notes: str = "",
-    db_path=None,
+    db_path: DbPath = None,
 ):
     init_db(db_path)
 
@@ -123,17 +145,39 @@ def record_identification_feedback(
         )
 
 
-def get_candidate_history_stats(norad_cat_id: str, db_path=None) -> Dict:
+def _empty_stats() -> HistoryStats:
+    return {
+        "confirmed": 0,
+        "rejected": 0,
+        "uncertain": 0,
+        "total": 0,
+    }
+
+
+def _rows_to_counts(rows: Iterable) -> HistoryStats:
+    """
+    Convert grouped SQL rows into the normalized stats structure used elsewhere.
+    """
+    counts = _empty_stats()
+
+    for label, count in rows:
+        key = str(label or "").strip().lower()
+        if key in counts:
+            counts[key] = int(count)
+
+    counts["total"] = counts["confirmed"] + counts["rejected"] + counts["uncertain"]
+    return counts
+
+
+def get_candidate_history_stats(norad_cat_id: str, db_path: DbPath = None) -> HistoryStats:
+    """
+    Global candidate history, regardless of victim mission.
+    """
     init_db(db_path)
 
     norad = str(norad_cat_id or "").strip()
     if not norad:
-        return {
-            "confirmed": 0,
-            "rejected": 0,
-            "uncertain": 0,
-            "total": 0,
-        }
+        return _empty_stats()
 
     with get_connection(db_path) as conn:
         rows = conn.execute(
@@ -146,17 +190,36 @@ def get_candidate_history_stats(norad_cat_id: str, db_path=None) -> Dict:
             (norad,),
         ).fetchall()
 
-    counts = {
-        "confirmed": 0,
-        "rejected": 0,
-        "uncertain": 0,
-        "total": 0,
-    }
+    return _rows_to_counts(rows)
 
-    for label, count in rows:
-        key = str(label or "").strip().lower()
-        if key in counts:
-            counts[key] = int(count)
 
-    counts["total"] = counts["confirmed"] + counts["rejected"] + counts["uncertain"]
-    return counts
+def get_candidate_history_stats_for_mission(
+    mission_id: str,
+    norad_cat_id: str,
+    db_path: DbPath = None,
+) -> HistoryStats:
+    """
+    Mission-specific candidate history:
+    how often this NORAD interfered with this ESA victim mission.
+    """
+    init_db(db_path)
+
+    mission = str(mission_id or "").strip().upper()
+    norad = str(norad_cat_id or "").strip()
+
+    if not mission or not norad:
+        return _empty_stats()
+
+    with get_connection(db_path) as conn:
+        rows = conn.execute(
+            """
+            SELECT user_label, COUNT(*)
+            FROM identification_feedback
+            WHERE mission_id = ?
+              AND norad_cat_id = ?
+            GROUP BY user_label
+            """,
+            (mission, norad),
+        ).fetchall()
+
+    return _rows_to_counts(rows)
