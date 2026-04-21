@@ -12,7 +12,10 @@ from typing import Any, Dict, Set
 from skyfield.api import load
 
 from cebreros_rfi.src.core.geometry_utils import build_station
-from cebreros_rfi.src.horizons_target_track import fetch_target_track
+from cebreros_rfi.src.horizons_target_track import (
+    fetch_target_track,
+    normalize_station_id,
+)
 from cebreros_rfi.src.local_candidate_catalog import (
     get_local_catalog_metadata,
     load_local_candidate_catalog,
@@ -58,14 +61,32 @@ STATION_CONFIGS = {
         elevation_m=794.0,
         allowed_bands={"X", "KA"},
     ),
+    "MLG": StationConfig(
+        lat_deg=-35.7760083,
+        lon_deg=-69.3981972,
+        elevation_m=1550.0,
+        allowed_bands={"X", "KA"},
+    ),
+    "NNO": StationConfig(
+        lat_deg=-31.03,
+        lon_deg=116.11,
+        elevation_m=252.0,
+        allowed_bands={"X", "KA"},
+    ),
 }
+
+SUPPORTED_STATION_IDS = tuple(sorted(STATION_CONFIGS.keys()))
 
 
 def get_station_config(station_id: str) -> StationConfig:
-    station_key = str(station_id or "").strip().upper()
+    station_key = normalize_station_id(station_id)
     if station_key not in STATION_CONFIGS:
         raise OperationalContextError("Unsupported station ID: {0}".format(station_id))
     return STATION_CONFIGS[station_key]
+
+
+def get_supported_station_ids():
+    return SUPPORTED_STATION_IDS
 
 
 def build_operational_context(
@@ -78,7 +99,7 @@ def build_operational_context(
     """
     Load the shared runtime context needed by identification/prediction flows.
     """
-    normalized_station_id = str(station_id or "").strip().upper()
+    normalized_station_id = normalize_station_id(station_id)
     normalized_mission_id = normalize_mission_name(mission_id)
 
     try:

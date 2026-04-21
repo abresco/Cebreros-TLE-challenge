@@ -2,28 +2,16 @@
 """
 Prediction service for:
 - manual future intervals
-- future schedule XML placeholder / best-effort parser
+- schedule CSV batch processing
 
 Prediction v1:
 - geometry-first
 - persistence-aware
 - history-assisted
 - outputs a heuristic probability (0-100)
-
-Important:
-Prediction uses both:
-1. mission-specific history (victim mission + interferer NORAD)
-2. global history (interferer NORAD)
-
-Mission-specific history has priority.
-
-Probability no longer includes a direct RF metadata bonus.
-RF / lookup information is still exposed as context in the outputs.
 """
 
-from pathlib import Path
 from typing import Dict, List, Tuple
-import xml.etree.ElementTree as ET
 
 from cebreros_rfi.src.core.candidate_helpers import preselect_geometric_candidates
 from cebreros_rfi.src.core.operational_context import (
@@ -33,13 +21,17 @@ from cebreros_rfi.src.core.operational_context import (
     PRESELECTION_SEP_DEG,
     build_operational_context,
 )
-from cebreros_rfi.src.mission_names import normalize_mission_name
-from cebreros_rfi.src.satnogs_band_lookup import lookup_bands_by_norad
 from cebreros_rfi.src.feedback_db import (
     HistoryStats,
     get_candidate_history_stats,
     get_candidate_history_stats_for_mission,
 )
+from cebreros_rfi.src.horizons_target_track import normalize_station_id
+from cebreros_rfi.src.mission_names import normalize_mission_name
+from cebreros_rfi.src.satnogs_band_lookup import lookup_bands_by_norad
+from cebreros_rfi.src.schedule_parser import parse_schedule_csv
+
+
 TOP_N_OUTPUT = 20
 MAX_RF_LOOKUPS = 20
 
@@ -76,9 +68,6 @@ def select_effective_history(
     mission_history_stats: HistoryStats,
     global_history_stats: HistoryStats,
 ) -> Tuple[str, HistoryStats]:
-    """
-    Use mission history when available, otherwise fall back to global history.
-    """
     if int(mission_history_stats.get("total", 0)) > 0:
         return "mission", mission_history_stats
     if int(global_history_stats.get("total", 0)) > 0:
@@ -97,47 +86,12 @@ def compute_probability(
     mission_history_stats: HistoryStats,
     global_history_stats: HistoryStats,
 ) -> float:
-    """
-    Probability model rationale:
-
-    1. Geometry:
-       Smaller separation should strongly increase probability, but not dominate everything.
-       We use:
-           geometry_component = max(0, 50 - 5 * min_sep_deg)
-
-       Examples:
-       - 0.5 deg -> 47.5
-       - 1.0 deg -> 45.0
-       - 2.0 deg -> 40.0
-       - 5.0 deg -> 25.0
-       - 10.0 deg -> 0.0
-
-    2. Persistence / duration:
-       Repeated close samples should matter a lot more than before.
-       We use:
-           duration_component = min(30, 3 * close_samples)
-
-       Examples:
-       - 1 sample  -> 3
-       - 5 samples -> 15
-       - 10 samples -> 30
-
-    3. History:
-       Mission-specific history has priority.
-       If no mission-specific history exists, fall back to 60% of the global-history signal.
-
-    No direct RF bonus is included in probability.
-    RF metadata remains visible in outputs, but not as score inflation.
-    """
     geometry_component = max(0.0, 50.0 - 5.0 * float(min_sep_deg))
     duration_component = min(30.0, float(close_samples) * 3.0)
 
-    mission_total = int(mission_history_stats.get("total", 0))
-    global_total = int(global_history_stats.get("total", 0))
-
-    if mission_total > 0:
+    if int(mission_history_stats.get("total", 0)) > 0:
         history_component = compute_history_component(mission_history_stats)
-    elif global_total > 0:
+    elif int(global_history_stats.get("total", 0)) > 0:
         history_component = 0.6 * compute_history_component(global_history_stats)
     else:
         history_component = 0.0
@@ -148,20 +102,11 @@ def compute_probability(
 
 def enrich_prediction_candidate(item: dict, victim_mission_id: str) -> dict:
     satnogs_info = lookup_bands_by_norad(item["norad_cat_id"])
-
     mission_history_stats = get_candidate_history_stats_for_mission(
         mission_id=victim_mission_id,
         norad_cat_id=item["norad_cat_id"],
     )
     global_history_stats = get_candidate_history_stats(item["norad_cat_id"])
-
-    probability = compute_probability(
-        min_sep_deg=item["min_sep_deg"],
-        close_samples=item["close_samples"],
-        mission_history_stats=mission_history_stats,
-        global_history_stats=global_history_stats,
-    )
-
     history_source, effective_history = select_effective_history(
         mission_history_stats=mission_history_stats,
         global_history_stats=global_history_stats,
@@ -176,10 +121,12 @@ def enrich_prediction_candidate(item: dict, victim_mission_id: str) -> dict:
             "all_satnogs_bands": satnogs_info.get("all_bands", ["UNKNOWN"]),
             "cebreros_freqs_mhz": satnogs_info.get("frequencies_mhz", []),
             "cebreros_bands": satnogs_info.get("bands", ["UNKNOWN"]),
-            "probability": probability,
-            "probability_label": probability_label(probability),
-            # Flat aliases keep the consumer contract simple while the detailed
-            # mission/global counters remain available for inspection.
+            "probability": compute_probability(
+                min_sep_deg=item["min_sep_deg"],
+                close_samples=item["close_samples"],
+                mission_history_stats=mission_history_stats,
+                global_history_stats=global_history_stats,
+            ),
             "history_source": history_source,
             "history_confirmed": effective_history.get("confirmed", 0),
             "history_rejected": effective_history.get("rejected", 0),
@@ -195,6 +142,7 @@ def enrich_prediction_candidate(item: dict, victim_mission_id: str) -> dict:
             "global_history_total": global_history_stats.get("total", 0),
         }
     )
+    enriched["probability_label"] = probability_label(enriched["probability"])
     return enriched
 
 
@@ -231,7 +179,12 @@ def run_prediction_interval(
     for item in preselected:
         if lookups_done >= MAX_RF_LOOKUPS:
             break
-        results.append(enrich_prediction_candidate(item, victim_mission_id=context.mission_id))
+        results.append(
+            enrich_prediction_candidate(
+                item=item,
+                victim_mission_id=context.mission_id,
+            )
+        )
         lookups_done += 1
 
     results.sort(
@@ -255,81 +208,38 @@ def run_prediction_interval(
     }
 
 
-def parse_schedule_xml(xml_path: str) -> List[Dict]:
-    xml_path = Path(xml_path)
-    if not xml_path.exists():
-        raise PredictionServiceError("XML file not found: {0}".format(xml_path))
-
-    tree = ET.parse(str(xml_path))
-    root = tree.getroot()
-
-    jobs = []
-
-    candidate_nodes = []
-    for tag_name in ("pass", "allocation", "track", "activity", "event"):
-        candidate_nodes.extend(root.findall(".//{0}".format(tag_name)))
-        candidate_nodes.extend(root.findall(".//{{*}}{0}".format(tag_name)))
-
-    def first_present(d, keys):
-        for key in keys:
-            value = d.get(key)
-            if value:
-                return value
-        return None
-
-    for node in candidate_nodes:
-        attrs = dict(node.attrib)
-
-        text_fields = {}
-        for child in list(node):
-            tag = child.tag.split("}")[-1].lower()
-            text_fields[tag] = (child.text or "").strip()
-
-        source = {}
-        source.update(attrs)
-        source.update(text_fields)
-
-        mission_id = first_present(source, ["mission_id", "mission", "spacecraft", "name"])
-        start_utc = first_present(source, ["start_utc", "start", "begin", "starttime"])
-        end_utc = first_present(source, ["end_utc", "end", "stop", "endtime"])
-
-        if mission_id and start_utc and end_utc:
-            jobs.append(
-                {
-                    "mission_id": normalize_mission_name(mission_id),
-                    "start_utc": start_utc,
-                    "end_utc": end_utc,
-                }
-            )
-
-    if not jobs:
-        raise PredictionServiceError(
-            "No prediction jobs could be extracted from the XML file. "
-            "Adapt parse_schedule_xml() once the ESA Scheduling XML structure is confirmed."
-        )
-
-    return jobs
-
-
-def run_prediction_schedule(
-    station_id: str,
-    xml_path: str,
+def load_prediction_jobs_from_schedule_csv(
+    csv_path: str,
+    station_filter: str,
 ) -> Dict:
-    jobs = parse_schedule_xml(xml_path)
+    return parse_schedule_csv(
+        csv_path=csv_path,
+        station_filter=station_filter,
+    )
+
+
+def run_prediction_jobs(
+    station_id: str,
+    jobs: List[Dict],
+) -> Dict:
+    normalized_station_id = normalize_station_id(station_id)
 
     batch_results = []
     for job in jobs:
         batch_results.append(
-            run_prediction_interval(
-                station_id=station_id,
-                mission_id=job["mission_id"],
-                start_utc=job["start_utc"],
-                end_utc=job["end_utc"],
-            )
+            {
+                "job_metadata": dict(job),
+                "prediction": run_prediction_interval(
+                    station_id=normalized_station_id,
+                    mission_id=normalize_mission_name(job["mission_id"]),
+                    start_utc=job["start_utc"],
+                    end_utc=job["end_utc"],
+                ),
+            }
         )
 
     return {
-        "station_id": station_id,
+        "station_id": normalized_station_id,
         "job_count": len(batch_results),
         "jobs": batch_results,
     }

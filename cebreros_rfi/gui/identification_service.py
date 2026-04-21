@@ -26,6 +26,8 @@ from cebreros_rfi.src.core.operational_context import (
     build_operational_context,
 )
 from cebreros_rfi.src.satnogs_band_lookup import lookup_bands_by_norad
+
+
 TOP_N_KNOWN_OUTPUT = 10
 TOP_N_UNKNOWN_OUTPUT = 10
 MAX_RF_LOOKUPS = 120
@@ -39,34 +41,27 @@ def enrich_candidate(item: dict, allowed_bands: set) -> dict:
     satnogs_info = lookup_bands_by_norad(item["norad_cat_id"])
 
     satnogs_bands = satnogs_info.get("bands", ["UNKNOWN"])
-    satnogs_freqs_mhz = satnogs_info.get("frequencies_mhz", [])
-    all_satnogs_bands = satnogs_info.get("all_bands", ["UNKNOWN"])
-    all_satnogs_freqs_mhz = satnogs_info.get("all_frequencies_mhz", [])
     lookup_status = satnogs_info.get("lookup_status", "unknown")
-
-    band_match = classify_band_match(satnogs_bands, allowed_bands)
     known_frequency = has_known_frequency(lookup_status)
-
-    score = (
-        compute_band_penalty(band_match)
-        + item["min_sep_deg"]
-        - 0.05 * item["close_samples"]
-    )
 
     enriched = dict(item)
     enriched.update(
         {
             "satnogs_bands": satnogs_bands,
-            "satnogs_freqs_mhz": satnogs_freqs_mhz,
-            "all_satnogs_bands": all_satnogs_bands,
-            "all_satnogs_freqs_mhz": all_satnogs_freqs_mhz,
-            "band_match": band_match,
-            "score": score,
+            "satnogs_freqs_mhz": satnogs_info.get("frequencies_mhz", []),
+            "all_satnogs_bands": satnogs_info.get("all_bands", ["UNKNOWN"]),
+            "all_satnogs_freqs_mhz": satnogs_info.get("all_frequencies_mhz", []),
+            "band_match": classify_band_match(satnogs_bands, allowed_bands),
             "satnogs_url": satnogs_info.get("satnogs_url"),
             "lookup_status": lookup_status,
             "has_known_frequency": known_frequency,
             "manual_review_candidate": not known_frequency,
         }
+    )
+    enriched["score"] = (
+        compute_band_penalty(enriched["band_match"])
+        + enriched["min_sep_deg"]
+        - 0.05 * enriched["close_samples"]
     )
     return enriched
 
@@ -90,10 +85,9 @@ def build_rankings(preselected_results: List[dict], allowed_bands: set):
         else:
             unknown_results.append(candidate)
 
-        if (
-            len(known_results) >= TOP_N_KNOWN_OUTPUT
-            and len(unknown_results) >= TOP_N_UNKNOWN_OUTPUT
-        ):
+        enough_known = len(known_results) >= TOP_N_KNOWN_OUTPUT
+        enough_unknown = len(unknown_results) >= TOP_N_UNKNOWN_OUTPUT
+        if enough_known and enough_unknown:
             break
 
     ranking_key = lambda item: (item["score"],) + candidate_sort_key(item)

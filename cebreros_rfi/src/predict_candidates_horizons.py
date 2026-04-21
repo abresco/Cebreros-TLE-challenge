@@ -5,48 +5,69 @@ CLI entrypoint for Prediction v1.
 
 import argparse
 import csv
+import sys
 from pathlib import Path
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from cebreros_rfi.gui.prediction_service import (
+    load_prediction_jobs_from_schedule_csv,
     run_prediction_interval,
-    run_prediction_schedule,
+    run_prediction_jobs,
 )
+
+PREDICTION_CSV_FIELDS = [
+    "object_name",
+    "norad_cat_id",
+    "lookup_status",
+    "all_satnogs_freqs_mhz",
+    "probability",
+    "probability_label",
+    "min_sep_deg",
+    "close_samples",
+    "closest_time_utc",
+    "possible_rfi_start_utc",
+    "possible_rfi_end_utc",
+    "sat_az_deg",
+    "sat_el_deg",
+    "target_az_deg",
+    "target_el_deg",
+    "sat_range_km",
+    "mission_history_confirmed",
+    "mission_history_rejected",
+    "mission_history_uncertain",
+    "mission_history_total",
+    "global_history_confirmed",
+    "global_history_rejected",
+    "global_history_uncertain",
+    "global_history_total",
+]
+
+
+def build_safe_output_name(station_id: str, mission_id: str, start_utc: str) -> str:
+    return "{0}_{1}_{2}".format(
+        station_id,
+        mission_id,
+        start_utc.replace(" ", "_").replace(":", ""),
+    )
 
 
 def write_prediction_csv(path: Path, rows):
     if not rows:
         return
 
-    fieldnames = [
-        "object_name",
-        "norad_cat_id",
-        "lookup_status",
-        "all_satnogs_freqs_mhz",
-        "probability",
-        "probability_label",
-        "min_sep_deg",
-        "close_samples",
-        "closest_time_utc",
-        "possible_rfi_start_utc",
-        "possible_rfi_end_utc",
-        "sat_az_deg",
-        "sat_el_deg",
-        "target_az_deg",
-        "target_el_deg",
-        "sat_range_km",
-        "history_confirmed",
-        "history_rejected",
-        "history_uncertain",
-    ]
-
     with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer = csv.DictWriter(handle, fieldnames=PREDICTION_CSV_FIELDS)
         writer.writeheader()
 
         for row in rows:
             out = dict(row)
-            out["all_satnogs_freqs_mhz"] = ",".join("{0:.3f}".format(x) for x in row.get("all_satnogs_freqs_mhz", []))
-            writer.writerow({key: out.get(key) for key in fieldnames})
+            out["all_satnogs_freqs_mhz"] = ",".join(
+                "{0:.3f}".format(x) for x in row.get("all_satnogs_freqs_mhz", [])
+            )
+            writer.writerow({key: out.get(key) for key in PREDICTION_CSV_FIELDS})
 
 
 def main():
@@ -55,7 +76,7 @@ def main():
     parser.add_argument("--mission-id")
     parser.add_argument("--start-utc")
     parser.add_argument("--end-utc")
-    parser.add_argument("--schedule-xml")
+    parser.add_argument("--schedule-csv")
     parser.add_argument("--output-dir", default="results_horizons_prediction")
 
     args = parser.parse_args()
@@ -63,31 +84,44 @@ def main():
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    if args.schedule_xml:
-        batch = run_prediction_schedule(
+    if args.schedule_csv:
+        schedule_info = load_prediction_jobs_from_schedule_csv(
+            csv_path=args.schedule_csv,
+            station_filter=args.station_id,
+        )
+
+        print("Schedule source:", schedule_info["source_path"])
+        print("Usable jobs:", schedule_info["job_count"])
+        print("Summary:", schedule_info["summary"])
+
+        batch = run_prediction_jobs(
             station_id=args.station_id,
-            xml_path=args.schedule_xml,
+            jobs=schedule_info["jobs"],
         )
 
         print("Prediction batch jobs:", batch["job_count"])
-        for index, job in enumerate(batch["jobs"], start=1):
+
+        for index, job_bundle in enumerate(batch["jobs"], start=1):
+            job = job_bundle["job_metadata"]
+            pred = job_bundle["prediction"]
+
             print(
                 "[{0}] {1} {2} -> {3} | candidates={4}".format(
                     index,
                     job["mission_id"],
                     job["start_utc"],
                     job["end_utc"],
-                    len(job["results"]),
+                    len(pred["results"]),
                 )
             )
 
-            safe_name = "{0}_{1}_{2}".format(
-                args.station_id,
-                job["mission_id"],
-                job["start_utc"].replace(" ", "_").replace(":", ""),
+            safe_name = build_safe_output_name(
+                station_id=args.station_id,
+                mission_id=job["mission_id"],
+                start_utc=job["start_utc"],
             )
             csv_path = output_dir / "{0}.csv".format(safe_name)
-            write_prediction_csv(csv_path, job["results"])
+            write_prediction_csv(csv_path, pred["results"])
             print("  CSV:", csv_path.resolve())
         return
 
@@ -118,10 +152,10 @@ def main():
             )
         )
 
-    safe_name = "{0}_{1}_{2}".format(
-        args.station_id,
-        result["mission_id"],
-        result["start_utc"].replace(" ", "_").replace(":", ""),
+    safe_name = build_safe_output_name(
+        station_id=args.station_id,
+        mission_id=result["mission_id"],
+        start_utc=result["start_utc"],
     )
     csv_path = output_dir / "{0}.csv".format(safe_name)
     write_prediction_csv(csv_path, result["results"])

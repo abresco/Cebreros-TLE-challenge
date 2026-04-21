@@ -6,7 +6,7 @@ Fetch target mission AZ/EL track from JPL Horizons for a given station and time 
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Dict
+from typing import Dict, Optional
 
 import pandas as pd
 import requests
@@ -29,18 +29,37 @@ MISSION_COMMANDS = {
 @dataclass(frozen=True)
 class GroundStation:
     station_id: str
-    latitude_deg: float
-    longitude_deg: float
-    height_km: float
+    mode: str
+    latitude_deg: Optional[float] = None
+    longitude_deg: Optional[float] = None
+    height_km: Optional[float] = None
+    center_name: Optional[str] = None
 
 
 STATIONS: Dict[str, GroundStation] = {
     "CEB": GroundStation(
         station_id="CEB",
+        mode="geodetic",
         latitude_deg=40.4526907,
         longitude_deg=-4.3675477,
         height_km=0.794132,
-    )
+    ),
+    "MLG": GroundStation(
+        station_id="MLG",
+        mode="center_name",
+        latitude_deg=-35.7760083,
+        longitude_deg=-69.3981972,
+        height_km=1.550,
+        center_name="Malarque (35-m, ESTrack DSA-3 MGUE)",
+    ),
+    "NNO": GroundStation(
+        station_id="NNO",
+        mode="center_name",
+        latitude_deg=-31.03,
+        longitude_deg=116.11,
+        height_km=0.252,
+        center_name="New Norcia (35-m, ESTrack DSA-1 NNO-1)",
+    ),
 }
 
 
@@ -48,20 +67,21 @@ class HorizonsError(RuntimeError):
     pass
 
 
+def normalize_station_id(station_id: str) -> str:
+    station = str(station_id or "").strip().upper()
+    if station == "NNO3":
+        return "NNO"
+    return station
+
+
 def get_station(station_id: str) -> GroundStation:
-    """
-    Resolve a supported station id into the coordinates expected by Horizons.
-    """
-    station_key = str(station_id or "").strip().upper()
+    station_key = normalize_station_id(station_id)
     if station_key not in STATIONS:
         raise HorizonsError("Unsupported station ID: {0}".format(station_id))
     return STATIONS[station_key]
 
 
 def get_mission_command(mission_id: str) -> str:
-    """
-    Convert the project mission id into the Horizons target command.
-    """
     mission = normalize_mission_name(mission_id)
     if mission not in MISSION_COMMANDS:
         raise HorizonsError("Unsupported mission ID for Horizons: {0}".format(mission_id))
@@ -77,9 +97,6 @@ def normalize_step_size_for_horizons(
     stop_time_utc: str,
     step_size: str,
 ) -> str:
-    """
-    Accept project-friendly step sizes and map them to the Horizons API format.
-    """
     step_size = step_size.strip().lower()
 
     if step_size.isdigit():
@@ -98,15 +115,8 @@ def normalize_step_size_for_horizons(
             raise HorizonsError("stop_time_utc must be later than start_time_utc.")
         if seconds <= 0:
             raise HorizonsError("Step size in seconds must be positive.")
-        if total_seconds % seconds != 0:
-            raise HorizonsError(
-                "Step '{0}' does not divide the interval exactly ({1} seconds).".format(
-                    step_size,
-                    total_seconds,
-                )
-            )
 
-        intervals = total_seconds // seconds
+        intervals = max(1, int(round(float(total_seconds) / float(seconds))))
         return str(intervals)
 
     raise HorizonsError(
@@ -127,19 +137,12 @@ def build_horizons_params(
         step_size=step_size,
     )
 
-    return {
+    params = {
         "format": "json",
         "COMMAND": "'{0}'".format(mission_command),
         "MAKE_EPHEM": "'YES'",
         "EPHEM_TYPE": "'OBSERVER'",
         "OBJ_DATA": "'YES'",
-        "CENTER": "'coord'",
-        "COORD_TYPE": "'GEODETIC'",
-        "SITE_COORD": "'{0},{1},{2}'".format(
-            station.longitude_deg,
-            station.latitude_deg,
-            station.height_km,
-        ),
         "START_TIME": "'{0}'".format(start_time_utc),
         "STOP_TIME": "'{0}'".format(stop_time_utc),
         "STEP_SIZE": "'{0}'".format(horizons_step_size),
@@ -155,11 +158,23 @@ def build_horizons_params(
         "QUANTITIES": "'4'",
     }
 
+    if station.mode == "geodetic":
+        params["CENTER"] = "'coord'"
+        params["COORD_TYPE"] = "'GEODETIC'"
+        params["SITE_COORD"] = "'{0},{1},{2}'".format(
+            station.longitude_deg,
+            station.latitude_deg,
+            station.height_km,
+        )
+    elif station.mode == "center_name":
+        params["CENTER"] = "'{0}'".format(station.center_name)
+    else:
+        raise HorizonsError("Unsupported station mode: {0}".format(station.mode))
+
+    return params
+
 
 def query_horizons(params):
-    """
-    Execute the Horizons request and return the raw result block.
-    """
     response = requests.get(HORIZONS_API_URL, params=params, timeout=180)
     response.raise_for_status()
     data = response.json()
@@ -187,9 +202,6 @@ def extract_soe_block(raw_result: str) -> str:
 
 
 def parse_horizons_csv_block(csv_block: str) -> pd.DataFrame:
-    """
-    Parse the $$SOE/$$EOE CSV payload into the AZ/EL dataframe used downstream.
-    """
     rows = []
 
     for line in csv_block.splitlines():
@@ -232,9 +244,6 @@ def fetch_target_track(
     stop_time_utc: str,
     step_size: str = "30s",
 ) -> pd.DataFrame:
-    """
-    End-to-end Horizons fetch for one mission pass interval.
-    """
     station = get_station(station_id)
     mission_command = get_mission_command(mission_id)
 

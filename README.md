@@ -8,6 +8,7 @@ The project currently supports:
 
 - **Identification** of possible interferers during past mission tracking intervals
 - **Prediction v1** of possible future interferers for upcoming mission tracking intervals
+- **Batch Prediction** from schedule CSV files using BOT-EOT pass intervals
 - **Local feedback storage** in SQLite to support future probability refinement
 
 ## Main Data Sources
@@ -133,5 +134,6 @@ RF metadata is shown as contextual information, but it does not directly increas
 
 ## Notes
 
-- The current implementation is focused on **CEB**
-- XML schedule support is prepared and may be adapted once the final ESA Scheduling XML structure is confirmed
+- The current implementation supports **CEB**, **MLG**, and **NNO**
+- In schedule-based Prediction, NNO3 is treated as NNO
+- Schedule-based Prediction currently supports **CSV planning files**

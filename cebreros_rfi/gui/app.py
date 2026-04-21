@@ -19,14 +19,17 @@ from cebreros_rfi.gui.identification_service import (
     IdentificationServiceError,
 )
 from cebreros_rfi.gui.prediction_service import (
+    load_prediction_jobs_from_schedule_csv,
     run_prediction_interval,
-    run_prediction_schedule,
+    run_prediction_jobs,
     PredictionServiceError,
 )
 from cebreros_rfi.src.feedback_db import (
     init_db,
     record_identification_feedback,
 )
+from cebreros_rfi.src.core.operational_context import get_supported_station_ids
+from cebreros_rfi.src.mission_names import MISSION_CANONICAL_NAMES
 
 init_db()
 
@@ -51,7 +54,7 @@ with st.expander("Help / Method"):
         - Output: ranked candidate interferers crossing the victim mission track
 
         **Prediction**
-        - Input: station, ESA mission, future UTC interval
+        - Input: station, ESA mission, future UTC interval or schedule CSV
         - Output: ranked future candidates, probability, and possible RFI slots
 
         ### Data sources
@@ -61,54 +64,20 @@ with st.expander("Help / Method"):
         - **SatNOGS**: contextual RF metadata when available
         - **SQLite**: local feedback database
 
-        ### Identification method
+        ### Schedule-based Prediction
 
-        The tool:
-        1. retrieves the victim mission AZ/EL track from Horizons
-        2. propagates external satellites from the local ACTIVE catalog
-        3. computes angular separation between victim and candidate tracks
-        4. ranks candidates by geometric proximity
-        5. shows contextual frequency metadata when available
-
-        ### Prediction method
-
-        Prediction is currently based on:
-        - minimum angular separation
-        - persistence across close samples
-        - historical recurrence from user feedback
-
-        RF metadata is shown as context, but it does not directly increase probability.
-
-        ### Probability meaning
-
-        Probability is currently a heuristic score from 0 to 100.
-        It should be interpreted as a ranked risk indicator, not as a calibrated physical probability.
-
-        - **HIGH**: strongest concern
-        - **MEDIUM**: moderate concern
-        - **LOW**: weaker concern
-
-        ### Feedback database
-
-        The feedback form stores:
-        - victim ESA mission
-        - candidate NORAD ID
-        - user label (`confirmed`, `rejected`, `uncertain`)
-
-        Prediction reuses this history, prioritizing:
-        1. mission-specific victim/interferer history
-        2. global interferer history
-
-        ### Current status
-
-        - Identification is operational
-        - Prediction v1 is operational
-        - XML schedule support is prepared and may be adapted once the final ESA Scheduling XML structure is confirmed
+        For schedule-based Prediction, the current implementation:
+        - parses a planning CSV
+        - uses **BOT-EOT** as the effective tracking interval
+        - supports **CEB**, **MLG**, and **NNO**
+        - treats **NNO3** as **NNO**
+        - allows filtering and selecting jobs before batch execution
         """
     )
 
-STATION_OPTIONS = ["CEB"]
-MISSION_OPTIONS = ["HERA", "JUICE", "SOLO", "BEPI", "MEX1", "EUCL"]
+
+STATION_OPTIONS = list(get_supported_station_ids())
+MISSION_OPTIONS = list(MISSION_CANONICAL_NAMES)
 FEEDBACK_LABEL_OPTIONS = ["confirmed", "rejected", "uncertain"]
 LIST_LIKE_COLUMNS = [
     "satnogs_freqs_mhz",
@@ -136,7 +105,7 @@ def format_list_like_value(value):
 
 def dataframe_for_display(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Convert list-heavy API fields into compact strings for the Streamlit tables.
+    Convert list-heavy fields into compact strings for the Streamlit tables.
     """
     df = df.copy()
 
@@ -326,7 +295,7 @@ with tab_prediction:
 
     mode = st.radio(
         "Prediction input mode",
-        ["Manual future interval", "Schedule XML"],
+        ["Manual future interval", "Schedule CSV"],
         horizontal=True,
     )
 
@@ -393,9 +362,8 @@ with tab_prediction:
                             "target_az_deg",
                             "target_el_deg",
                             "sat_range_km",
-                            "history_confirmed",
-                            "history_rejected",
-                            "history_uncertain",
+                            "mission_history_confirmed",
+                            "global_history_confirmed",
                         ]
                     ].rename(
                         columns={
@@ -415,9 +383,8 @@ with tab_prediction:
                             "target_az_deg": "Target AZ",
                             "target_el_deg": "Target EL",
                             "sat_range_km": "Range (km)",
-                            "history_confirmed": "History Confirmed",
-                            "history_rejected": "History Rejected",
-                            "history_uncertain": "History Uncertain",
+                            "mission_history_confirmed": "Mission Hist Confirmed",
+                            "global_history_confirmed": "Global Hist Confirmed",
                         }
                     ),
                     use_container_width=True,
@@ -427,67 +394,166 @@ with tab_prediction:
                 st.info("No predicted candidates found for this interval.")
 
     else:
-        st.caption("Prepared for ESA Station Allocation Plans (XML) integration.")
+        st.caption("Upload a schedule CSV, choose the station filter, preview usable jobs, and run batch Prediction on the selected passes.")
 
-        uploaded_xml = st.file_uploader("Upload schedule XML", type=["xml"])
+        schedule_station = st.selectbox(
+            "Schedule station filter",
+            STATION_OPTIONS,
+            index=0,
+            key="schedule_station_filter",
+        )
 
-        if uploaded_xml is not None:
+        uploaded_csv = st.file_uploader("Upload schedule CSV", type=["csv"])
+
+        if uploaded_csv is not None:
             try:
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".xml") as tmp:
-                    tmp.write(uploaded_xml.read())
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as tmp:
+                    tmp.write(uploaded_csv.read())
                     tmp_path = tmp.name
 
-                with st.spinner("Running schedule prediction..."):
-                    batch_result = run_prediction_schedule(
-                        station_id="CEB",
-                        xml_path=tmp_path,
+                schedule_info = load_prediction_jobs_from_schedule_csv(
+                    csv_path=tmp_path,
+                    station_filter=schedule_station,
+                )
+
+                st.success("Schedule parsed")
+                st.write("Summary:", schedule_info["summary"])
+
+                jobs_df = pd.DataFrame(schedule_info["jobs"])
+                if jobs_df.empty:
+                    st.warning("No usable jobs found for the selected station.")
+                else:
+                    mission_options = sorted(jobs_df["mission_id"].dropna().unique().tolist())
+
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        selected_missions = st.multiselect(
+                            "Filter by mission",
+                            mission_options,
+                            default=mission_options,
+                        )
+                    with col2:
+                        max_rows = st.number_input(
+                            "Maximum rows to show",
+                            min_value=1,
+                            max_value=500,
+                            value=min(50, len(jobs_df)),
+                            step=1,
+                        )
+
+                    filtered_df = jobs_df[jobs_df["mission_id"].isin(selected_missions)].copy()
+                    filtered_df = filtered_df.sort_values(by=["start_utc", "mission_id"]).reset_index(drop=True)
+
+                    preview_df = filtered_df.head(int(max_rows)).copy()
+
+                    st.markdown("### Schedule jobs preview")
+                    st.dataframe(
+                        preview_df[
+                            [
+                                "job_id",
+                                "mission_id",
+                                "station_id",
+                                "start_utc",
+                                "end_utc",
+                                "reference",
+                                "comment",
+                            ]
+                        ].rename(
+                            columns={
+                                "job_id": "Job ID",
+                                "mission_id": "Mission",
+                                "station_id": "Station",
+                                "start_utc": "BOT UTC",
+                                "end_utc": "EOT UTC",
+                                "reference": "Reference",
+                                "comment": "Comment",
+                            }
+                        ),
+                        use_container_width=True,
+                        hide_index=True,
                     )
 
-                st.success("Schedule prediction completed")
-                st.write("Jobs parsed:", batch_result["job_count"])
+                    selectable_jobs = preview_df.to_dict(orient="records")
+                    option_map = {
+                        "{0} | {1} | {2} -> {3} | {4}".format(
+                            item["job_id"],
+                            item["mission_id"],
+                            item["start_utc"],
+                            item["end_utc"],
+                            item["reference"] or "no_reference",
+                        ): item
+                        for item in selectable_jobs
+                    }
 
-                for idx, job in enumerate(batch_result["jobs"], start=1):
-                    st.markdown(
-                        "#### Job {0}: {1} | {2} → {3}".format(
-                            idx,
-                            job["mission_id"],
-                            job["start_utc"],
-                            job["end_utc"],
-                        )
+                    selected_labels = st.multiselect(
+                        "Select schedule jobs to run",
+                        list(option_map.keys()),
+                        default=list(option_map.keys())[: min(5, len(option_map))],
                     )
-                    job_df = dataframe_for_display(pd.DataFrame(job["results"]))
-                    if not job_df.empty:
-                        st.dataframe(
-                            job_df[
-                                [
-                                    "object_name",
-                                    "norad_cat_id",
-                                    "probability",
-                                    "probability_label",
-                                    "lookup_status",
-                                    "all_satnogs_freqs_mhz",
-                                    "min_sep_deg",
-                                    "possible_rfi_start_utc",
-                                    "possible_rfi_end_utc",
-                                ]
-                            ].rename(
-                                columns={
-                                    "object_name": "Object",
-                                    "norad_cat_id": "NORAD",
-                                    "probability": "Probability",
-                                    "probability_label": "Probability Level",
-                                    "lookup_status": "Lookup Status",
-                                    "all_satnogs_freqs_mhz": "All Freqs (MHz)",
-                                    "min_sep_deg": "Min Sep (deg)",
-                                    "possible_rfi_start_utc": "Possible RFI Start UTC",
-                                    "possible_rfi_end_utc": "Possible RFI End UTC",
-                                }
-                            ),
-                            use_container_width=True,
-                            hide_index=True,
-                        )
-                    else:
-                        st.info("No candidates found for this job.")
+
+                    if st.button("Run Batch Prediction on Selected Jobs", use_container_width=True):
+                        selected_jobs = [option_map[label] for label in selected_labels]
+
+                        if not selected_jobs:
+                            st.warning("Select at least one schedule job.")
+                        else:
+                            with st.spinner("Running batch prediction..."):
+                                batch_result = run_prediction_jobs(
+                                    station_id=schedule_station,
+                                    jobs=selected_jobs,
+                                )
+
+                            st.success("Batch Prediction completed")
+                            st.write("Jobs processed:", batch_result["job_count"])
+
+                            for idx, job_bundle in enumerate(batch_result["jobs"], start=1):
+                                job = job_bundle["job_metadata"]
+                                pred = job_bundle["prediction"]
+
+                                st.markdown(
+                                    "#### Job {0}: {1} | {2} -> {3}".format(
+                                        idx,
+                                        job["mission_id"],
+                                        job["start_utc"],
+                                        job["end_utc"],
+                                    )
+                                )
+
+                                job_df = dataframe_for_display(pd.DataFrame(pred["results"]))
+                                if not job_df.empty:
+                                    st.dataframe(
+                                        job_df[
+                                            [
+                                                "object_name",
+                                                "norad_cat_id",
+                                                "probability",
+                                                "probability_label",
+                                                "lookup_status",
+                                                "all_satnogs_freqs_mhz",
+                                                "min_sep_deg",
+                                                "close_samples",
+                                                "possible_rfi_start_utc",
+                                                "possible_rfi_end_utc",
+                                            ]
+                                        ].rename(
+                                            columns={
+                                                "object_name": "Object",
+                                                "norad_cat_id": "NORAD",
+                                                "probability": "Probability",
+                                                "probability_label": "Probability Level",
+                                                "lookup_status": "Lookup Status",
+                                                "all_satnogs_freqs_mhz": "All Freqs (MHz)",
+                                                "min_sep_deg": "Min Sep (deg)",
+                                                "close_samples": "Close Samples",
+                                                "possible_rfi_start_utc": "Possible RFI Start UTC",
+                                                "possible_rfi_end_utc": "Possible RFI End UTC",
+                                            }
+                                        ),
+                                        use_container_width=True,
+                                        hide_index=True,
+                                    )
+                                else:
+                                    st.info("No candidates found for this job.")
 
             except PredictionServiceError as exc:
                 st.error(str(exc))
