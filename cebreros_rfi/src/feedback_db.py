@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# Author: Agustí Brescó
+# Entity: UPC - EETAC
+# Copyright (c) 2026
+
 """
 SQLite database for Identification feedback and future Prediction scoring.
 """

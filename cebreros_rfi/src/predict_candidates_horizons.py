@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# Author: Agustí Brescó
+# Entity: UPC - EETAC
+# Copyright (c) 2026
+
 """
 CLI entrypoint for Prediction v1.
 """

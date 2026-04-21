@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# Author: Agustí Brescó
+# Entity: UPC - EETAC
+# Copyright (c) 2026
+
 """
 Load a locally cached ACTIVE candidate catalog and convert it to Skyfield satellites.
 """

@@ -2,6 +2,11 @@
 
 Python-based tool for **RFI Identification and Prediction** at the ESA Cebreros tracking station.
 
+## Authorship
+
+- **Author:** Agustí Brescó
+- **Entity:** UPC - EETAC
+
 ## Current Status
 
 The project currently supports:

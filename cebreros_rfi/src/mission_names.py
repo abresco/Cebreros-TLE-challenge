@@ -1,3 +1,7 @@
+# Author: Agustí Brescó
+# Entity: UPC - EETAC
+# Copyright (c) 2026
+
 """
 Mission name normalization helpers shared across CLI and GUI entrypoints.
 """

@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# Author: Agustí Brescó
+# Entity: UPC - EETAC
+# Copyright (c) 2026
+
 """
 Fetch target mission AZ/EL track from JPL Horizons for a given station and time slot.
 """

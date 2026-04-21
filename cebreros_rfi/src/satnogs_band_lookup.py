@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# Author: Agustí Brescó
+# Entity: UPC - EETAC
+# Copyright (c) 2026
+
 """
 SatNOGS DB lookup by NORAD ID using the transmitters endpoint directly.
 
