@@ -15,19 +15,16 @@ from typing import Dict, Optional
 import pandas as pd
 import requests
 
+from cebreros_rfi.src.config_loader import (
+    ConfigError,
+    get_horizons_mission_command,
+    get_station_horizons_config,
+    normalize_station_id as normalize_station_id_from_config,
+)
 from cebreros_rfi.src.mission_names import normalize_mission_name
 
 HORIZONS_API_URL = "https://ssd.jpl.nasa.gov/api/horizons.api"
 UTC_DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S"
-
-MISSION_COMMANDS = {
-    "HERA": "-91",
-    "JUICE": "-28",
-    "SOLO": "-144",
-    "BEPI": "-121",
-    "MEX1": "-41",
-    "EUCL": "-680",
-}
 
 
 @dataclass(frozen=True)
@@ -40,56 +37,52 @@ class GroundStation:
     center_name: Optional[str] = None
 
 
-STATIONS: Dict[str, GroundStation] = {
-    "CEB": GroundStation(
-        station_id="CEB",
-        mode="geodetic",
-        latitude_deg=40.4526907,
-        longitude_deg=-4.3675477,
-        height_km=0.794132,
-    ),
-    "MLG": GroundStation(
-        station_id="MLG",
-        mode="center_name",
-        latitude_deg=-35.7760083,
-        longitude_deg=-69.3981972,
-        height_km=1.550,
-        center_name="Malarque (35-m, ESTrack DSA-3 MGUE)",
-    ),
-    "NNO": GroundStation(
-        station_id="NNO",
-        mode="center_name",
-        latitude_deg=-31.03,
-        longitude_deg=116.11,
-        height_km=0.252,
-        center_name="New Norcia (35-m, ESTrack DSA-1 NNO-1)",
-    ),
-}
-
-
 class HorizonsError(RuntimeError):
     pass
 
 
 def normalize_station_id(station_id: str) -> str:
-    station = str(station_id or "").strip().upper()
-    if station == "NNO3":
-        return "NNO"
-    return station
+    return normalize_station_id_from_config(station_id)
 
 
 def get_station(station_id: str) -> GroundStation:
     station_key = normalize_station_id(station_id)
-    if station_key not in STATIONS:
-        raise HorizonsError("Unsupported station ID: {0}".format(station_id))
-    return STATIONS[station_key]
+    try:
+        cfg = get_station_horizons_config(station_key)
+    except ConfigError as exc:
+        raise HorizonsError(str(exc)) from exc
+
+    mode = str(cfg.get("mode", "")).strip().lower()
+    if mode == "geodetic":
+        return GroundStation(
+            station_id=station_key,
+            mode=mode,
+            latitude_deg=float(cfg["latitude_deg"]),
+            longitude_deg=float(cfg["longitude_deg"]),
+            height_km=float(cfg["height_km"]),
+        )
+
+    if mode == "center_name":
+        center_name = str(cfg.get("center_name", "")).strip()
+        if not center_name:
+            raise HorizonsError(
+                "Missing center_name for station {0} in Horizons config.".format(station_key)
+            )
+        return GroundStation(
+            station_id=station_key,
+            mode=mode,
+            center_name=center_name,
+        )
+
+    raise HorizonsError("Unsupported Horizons mode for station {0}: {1}".format(station_key, mode))
 
 
 def get_mission_command(mission_id: str) -> str:
     mission = normalize_mission_name(mission_id)
-    if mission not in MISSION_COMMANDS:
-        raise HorizonsError("Unsupported mission ID for Horizons: {0}".format(mission_id))
-    return MISSION_COMMANDS[mission]
+    try:
+        return get_horizons_mission_command(mission)
+    except ConfigError as exc:
+        raise HorizonsError(str(exc)) from exc
 
 
 def parse_utc_datetime(dt_str: str) -> datetime:

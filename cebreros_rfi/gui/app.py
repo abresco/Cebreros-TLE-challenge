@@ -32,8 +32,8 @@ from cebreros_rfi.src.feedback_db import (
     init_db,
     record_identification_feedback,
 )
+from cebreros_rfi.src.config_loader import get_gui_config, get_mission_ids
 from cebreros_rfi.src.core.operational_context import get_supported_station_ids
-from cebreros_rfi.src.mission_names import MISSION_CANONICAL_NAMES
 
 init_db()
 
@@ -79,9 +79,9 @@ with st.expander("Help / Method"):
         """
     )
 
-
+GUI_CONFIG = get_gui_config()
 STATION_OPTIONS = list(get_supported_station_ids())
-MISSION_OPTIONS = list(MISSION_CANONICAL_NAMES)
+MISSION_OPTIONS = list(get_mission_ids())
 FEEDBACK_LABEL_OPTIONS = ["confirmed", "rejected", "uncertain"]
 LIST_LIKE_COLUMNS = [
     "satnogs_freqs_mhz",
@@ -90,6 +90,13 @@ LIST_LIKE_COLUMNS = [
     "cebreros_freqs_mhz",
     "cebreros_bands",
 ]
+
+
+def get_selectbox_index(options, configured_value, fallback_index=0):
+    try:
+        return options.index(configured_value)
+    except ValueError:
+        return fallback_index
 
 
 def format_list_like_value(value):
@@ -130,17 +137,38 @@ with tab_identification:
         col1, col2 = st.columns(2)
 
         with col1:
-            station_id = st.selectbox("Station ID", STATION_OPTIONS, index=0, key="id_station")
+            station_id = st.selectbox(
+                "Station ID",
+                STATION_OPTIONS,
+                index=get_selectbox_index(
+                    STATION_OPTIONS,
+                    GUI_CONFIG.get("default_station"),
+                    fallback_index=0,
+                ),
+                key="id_station",
+            )
             mission_id = st.selectbox(
                 "Mission ID",
                 MISSION_OPTIONS,
-                index=1,
+                index=get_selectbox_index(
+                    MISSION_OPTIONS,
+                    GUI_CONFIG.get("default_identification_mission"),
+                    fallback_index=0,
+                ),
                 key="id_mission",
             )
 
         with col2:
-            start_utc = st.text_input("Start UTC", value="2025-07-25 04:56:00", key="id_start")
-            end_utc = st.text_input("End UTC", value="2025-07-25 04:58:00", key="id_end")
+            start_utc = st.text_input(
+                "Start UTC",
+                value=str(GUI_CONFIG.get("default_identification_start_utc", "")),
+                key="id_start",
+            )
+            end_utc = st.text_input(
+                "End UTC",
+                value=str(GUI_CONFIG.get("default_identification_end_utc", "")),
+                key="id_end",
+            )
 
         submitted = st.form_submit_button("Run Identification", use_container_width=True)
 
@@ -308,17 +336,38 @@ with tab_prediction:
             col1, col2 = st.columns(2)
 
             with col1:
-                pred_station_id = st.selectbox("Station ID", STATION_OPTIONS, index=0, key="pred_station")
+                pred_station_id = st.selectbox(
+                    "Station ID",
+                    STATION_OPTIONS,
+                    index=get_selectbox_index(
+                        STATION_OPTIONS,
+                        GUI_CONFIG.get("default_station"),
+                        fallback_index=0,
+                    ),
+                    key="pred_station",
+                )
                 pred_mission_id = st.selectbox(
                     "Mission ID",
                     MISSION_OPTIONS,
-                    index=1,
+                    index=get_selectbox_index(
+                        MISSION_OPTIONS,
+                        GUI_CONFIG.get("default_prediction_mission"),
+                        fallback_index=0,
+                    ),
                     key="pred_mission",
                 )
 
             with col2:
-                pred_start_utc = st.text_input("Future Start UTC", value="2026-01-05 10:00:00", key="pred_start")
-                pred_end_utc = st.text_input("Future End UTC", value="2026-01-05 10:20:00", key="pred_end")
+                pred_start_utc = st.text_input(
+                    "Future Start UTC",
+                    value=str(GUI_CONFIG.get("default_prediction_start_utc", "")),
+                    key="pred_start",
+                )
+                pred_end_utc = st.text_input(
+                    "Future End UTC",
+                    value=str(GUI_CONFIG.get("default_prediction_end_utc", "")),
+                    key="pred_end",
+                )
 
             run_prediction = st.form_submit_button("Run Prediction", use_container_width=True)
 
@@ -403,7 +452,11 @@ with tab_prediction:
         schedule_station = st.selectbox(
             "Schedule station filter",
             STATION_OPTIONS,
-            index=0,
+            index=get_selectbox_index(
+                STATION_OPTIONS,
+                GUI_CONFIG.get("default_station"),
+                fallback_index=0,
+            ),
             key="schedule_station_filter",
         )
 

@@ -16,6 +16,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from cebreros_rfi.src.config_loader import get_gui_config
 from cebreros_rfi.gui.prediction_service import (
     load_prediction_jobs_from_schedule_csv,
     run_prediction_interval,
@@ -75,8 +76,9 @@ def write_prediction_csv(path: Path, rows):
 
 
 def main():
+    gui_config = get_gui_config()
     parser = argparse.ArgumentParser(description="Prediction v1 using Horizons + local ACTIVE catalog.")
-    parser.add_argument("--station-id", default="CEB")
+    parser.add_argument("--station-id", default=str(gui_config.get("default_station", "CEB")))
     parser.add_argument("--mission-id")
     parser.add_argument("--start-utc")
     parser.add_argument("--end-utc")

@@ -1,0 +1,141 @@
+# Central application configuration.
+# Users should edit this file instead of changing Python source code.
+
+# Station settings used by identification, prediction, and schedule workflows.
+stations:
+  # Alternate station labels accepted from user input or external files.
+  aliases:
+    NNO3: NNO
+
+  # Station-specific operational definitions.
+  definitions:
+    CEB:
+      # RF bands considered valid for this station.
+      allowed_bands: [X, KA]
+      # Coordinates used by Skyfield geometry calculations.
+      skyfield:
+        lat_deg: 40.4526889
+        lon_deg: -4.36755
+        elevation_m: 794.0
+      # Station definition used when querying JPL Horizons.
+      horizons:
+        mode: geodetic
+        latitude_deg: 40.4526907
+        longitude_deg: -4.3675477
+        height_km: 0.794132
+
+    MLG:
+      allowed_bands: [X, KA]
+      skyfield:
+        lat_deg: -35.7760083
+        lon_deg: -69.3981972
+        elevation_m: 1550.0
+      horizons:
+        # Use the official Horizons center name instead of explicit geodetic coordinates.
+        mode: center_name
+        center_name: "Malarque (35-m, ESTrack DSA-3 MGUE)"
+
+    NNO:
+      allowed_bands: [X, KA]
+      skyfield:
+        lat_deg: -31.03
+        lon_deg: 116.11
+        elevation_m: 252.0
+      horizons:
+        mode: center_name
+        center_name: "New Norcia (35-m, ESTrack DSA-1 NNO-1)"
+
+# Supported victim missions and their Horizons target identifiers.
+missions:
+  # Canonical mission IDs accepted by the app.
+  supported_ids:
+    - HERA
+    - JUICE
+    - SOLO
+    - BEPI
+    - MEX1
+    - EUCL
+
+  # JPL Horizons COMMAND values for each mission.
+  horizons_commands:
+    HERA: "-91"
+    JUICE: "-28"
+    SOLO: "-144"
+    BEPI: "-121"
+    MEX1: "-41"
+    EUCL: "-680"
+
+# Parameters for manual identification runs.
+identification:
+  # Sampling step passed to Horizons. Values like 60s, 1m, 10m are supported.
+  step_size: "60s"
+  # Broad geometry filter applied before expensive candidate enrichment.
+  preselection_sep_deg: 10.0
+  # Final angular threshold used to count close approach samples.
+  final_sep_deg: 5.0
+  # Ignore unrealistic candidate passes beyond this slant range.
+  max_reasonable_range_km: 100000.0
+  # Hard limit on SatNOGS RF lookups per run.
+  max_rf_lookups: 120
+  # Max ranked outputs shown for candidates with known RF context.
+  top_n_known_output: 10
+  # Max ranked outputs shown for candidates without known RF context.
+  top_n_unknown_output: 10
+
+# Parameters for manual prediction and schedule-based prediction runs.
+prediction:
+  # Sampling step passed to Horizons. Values like 60s, 1m, 10m are supported.
+  step_size: "60s"
+  # Broad geometry filter applied before probability scoring.
+  preselection_sep_deg: 10.0
+  # Final angular threshold used to define close approach windows.
+  final_sep_deg: 5.0
+  # Ignore unrealistic candidate passes beyond this slant range.
+  max_reasonable_range_km: 100000.0
+  # Hard limit on SatNOGS RF lookups per run.
+  max_rf_lookups: 20
+  # Max number of ranked candidates returned per prediction interval.
+  top_n_output: 20
+
+  # Heuristic probability model parameters.
+  scoring:
+    # Starting geometry score before angular penalty is applied.
+    geometry_base: 50.0
+    # Score removed per degree of minimum separation.
+    geometry_penalty_per_deg: 5.0
+    # Score added for each close sample in the interval.
+    duration_gain_per_sample: 3.0
+    # Upper bound for the duration contribution.
+    duration_cap: 30.0
+    # Positive contribution from confirmed historical cases.
+    history_confirmed_gain: 4.0
+    history_confirmed_cap: 20.0
+    # Negative contribution from rejected historical cases.
+    history_rejected_penalty: 3.0
+    history_rejected_cap: 12.0
+    # Small positive contribution from uncertain historical cases.
+    history_uncertain_gain: 1.0
+    history_uncertain_cap: 4.0
+    # Weight applied when only global, non-mission-specific history exists.
+    global_history_weight: 0.6
+
+# Local ACTIVE catalog refresh policy.
+catalog:
+  # Refresh the local CelesTrak cache when older than this many hours(2h minimum recommended).
+  refresh_max_age_hours: 2
+
+# Schedule parsing behavior.
+schedule:
+  # Effective prediction interval extracted from schedule rows.
+  # Current supported behavior is BOT-EOT.
+  effective_interval: BOT_EOT
+
+# Default values preloaded by the Streamlit GUI.
+gui:
+  default_station: CEB
+  default_identification_mission: JUICE
+  default_prediction_mission: JUICE
+  default_identification_start_utc: "2025-07-25 04:56:00"
+  default_identification_end_utc: "2025-07-25 04:58:00"
+  default_prediction_start_utc: "2026-01-05 10:00:00"
+  default_prediction_end_utc: "2026-01-05 10:20:00"

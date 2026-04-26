@@ -22,13 +22,14 @@ from pathlib import Path
 
 import requests
 
+from cebreros_rfi.src.config_loader import get_catalog_refresh_max_age_seconds
+
 
 CELESTRAK_GP_URL = "https://celestrak.org/NORAD/elements/gp.php"
 CATALOG_OUTPUT_PATH = Path("cebreros_rfi/data/cache/full_active_catalog.json")
 USER_AGENT = "CEB-RFI-Identifier/1.0"
 
-# Requested behavior: auto-refresh if older than 2 hours.
-DEFAULT_MAX_AGE_SECONDS = 2 * 3600
+DEFAULT_MAX_AGE_SECONDS = get_catalog_refresh_max_age_seconds()
 
 
 def fetch_celestrak_group(group_name):

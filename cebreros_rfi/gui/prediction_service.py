@@ -17,12 +17,12 @@ Prediction v1:
 
 from typing import Dict, List, Tuple
 
+from cebreros_rfi.src.config_loader import (
+    get_prediction_config,
+    get_prediction_scoring_config,
+)
 from cebreros_rfi.src.core.candidate_helpers import preselect_geometric_candidates
 from cebreros_rfi.src.core.operational_context import (
-    DEFAULT_STEP_SIZE,
-    FINAL_SEP_DEG,
-    MAX_REASONABLE_RANGE_KM,
-    PRESELECTION_SEP_DEG,
     build_operational_context,
 )
 from cebreros_rfi.src.feedback_db import (
@@ -36,12 +36,16 @@ from cebreros_rfi.src.satnogs_band_lookup import lookup_bands_by_norad
 from cebreros_rfi.src.schedule_parser import parse_schedule_csv
 
 
-TOP_N_OUTPUT = 20
-MAX_RF_LOOKUPS = 20
-
-
 class PredictionServiceError(RuntimeError):
     pass
+
+
+def get_runtime_config() -> Dict:
+    return get_prediction_config()
+
+
+def get_scoring_runtime_config() -> Dict:
+    return get_prediction_scoring_config()
 
 
 def clamp(value: float, low: float, high: float) -> float:
@@ -56,15 +60,15 @@ def probability_label(probability: float) -> str:
     return "LOW"
 
 
-def compute_history_component(history_stats: HistoryStats) -> float:
+def compute_history_component(history_stats: HistoryStats, scoring_cfg: Dict) -> float:
     confirmed = int(history_stats.get("confirmed", 0))
     rejected = int(history_stats.get("rejected", 0))
     uncertain = int(history_stats.get("uncertain", 0))
 
     return (
-        min(20.0, confirmed * 4.0)
-        - min(12.0, rejected * 3.0)
-        + min(4.0, uncertain * 1.0)
+        min(float(scoring_cfg["history_confirmed_cap"]), confirmed * float(scoring_cfg["history_confirmed_gain"]))
+        - min(float(scoring_cfg["history_rejected_cap"]), rejected * float(scoring_cfg["history_rejected_penalty"]))
+        + min(float(scoring_cfg["history_uncertain_cap"]), uncertain * float(scoring_cfg["history_uncertain_gain"]))
     )
 
 
@@ -90,13 +94,25 @@ def compute_probability(
     mission_history_stats: HistoryStats,
     global_history_stats: HistoryStats,
 ) -> float:
-    geometry_component = max(0.0, 50.0 - 5.0 * float(min_sep_deg))
-    duration_component = min(30.0, float(close_samples) * 3.0)
+    scoring_cfg = get_scoring_runtime_config()
+
+    geometry_component = max(
+        0.0,
+        float(scoring_cfg["geometry_base"])
+        - float(scoring_cfg["geometry_penalty_per_deg"]) * float(min_sep_deg),
+    )
+    duration_component = min(
+        float(scoring_cfg["duration_cap"]),
+        float(close_samples) * float(scoring_cfg["duration_gain_per_sample"]),
+    )
 
     if int(mission_history_stats.get("total", 0)) > 0:
-        history_component = compute_history_component(mission_history_stats)
+        history_component = compute_history_component(mission_history_stats, scoring_cfg)
     elif int(global_history_stats.get("total", 0)) > 0:
-        history_component = 0.6 * compute_history_component(global_history_stats)
+        history_component = float(scoring_cfg["global_history_weight"]) * compute_history_component(
+            global_history_stats,
+            scoring_cfg,
+        )
     else:
         history_component = 0.0
 
@@ -156,13 +172,15 @@ def run_prediction_interval(
     start_utc: str,
     end_utc: str,
 ) -> Dict:
+    config = get_runtime_config()
+
     try:
         context = build_operational_context(
             station_id=station_id,
             mission_id=mission_id,
             start_utc=start_utc,
             end_utc=end_utc,
-            step_size=DEFAULT_STEP_SIZE,
+            step_size=str(config["step_size"]),
         )
     except Exception as exc:
         raise PredictionServiceError(str(exc))
@@ -171,17 +189,19 @@ def run_prediction_interval(
         target_track_df=context.target_track_df,
         satellites=context.satellites,
         station=context.station,
-        preselection_sep_deg=PRESELECTION_SEP_DEG,
-        final_sep_deg=FINAL_SEP_DEG,
-        max_reasonable_range_km=MAX_REASONABLE_RANGE_KM,
+        preselection_sep_deg=float(config["preselection_sep_deg"]),
+        final_sep_deg=float(config["final_sep_deg"]),
+        max_reasonable_range_km=float(config["max_reasonable_range_km"]),
         include_possible_rfi_slot=True,
     )
 
     results = []
     lookups_done = 0
+    max_rf_lookups = int(config["max_rf_lookups"])
+    top_n_output = int(config["top_n_output"])
 
     for item in preselected:
-        if lookups_done >= MAX_RF_LOOKUPS:
+        if lookups_done >= max_rf_lookups:
             break
         results.append(
             enrich_prediction_candidate(
@@ -208,7 +228,7 @@ def run_prediction_interval(
         "catalog_meta": context.catalog_meta,
         "preselected_count": len(preselected),
         "lookups_done": lookups_done,
-        "results": results[:TOP_N_OUTPUT],
+        "results": results[:top_n_output],
     }
 
 

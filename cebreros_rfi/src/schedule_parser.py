@@ -21,15 +21,15 @@ from typing import Dict
 
 import pandas as pd
 
-from cebreros_rfi.src.mission_names import (
-    MISSION_CANONICAL_NAMES,
-    normalize_mission_name,
-)
+from cebreros_rfi.src.config_loader import get_mission_ids, get_schedule_effective_interval
 from cebreros_rfi.src.core.operational_context import get_supported_station_ids
 from cebreros_rfi.src.horizons_target_track import normalize_station_id
+from cebreros_rfi.src.mission_names import normalize_mission_name
 
 
 SUPPORTED_PREDICTION_STATIONS = set(get_supported_station_ids())
+SUPPORTED_MISSION_IDS = set(get_mission_ids())
+SUPPORTED_EFFECTIVE_INTERVAL = "BOT_EOT"
 
 
 class ScheduleParserError(RuntimeError):
@@ -59,6 +59,12 @@ def parse_schedule_csv(
     csv_path: str,
     station_filter: str,
 ) -> Dict:
+    effective_interval = get_schedule_effective_interval()
+    if effective_interval != SUPPORTED_EFFECTIVE_INTERVAL:
+        raise ScheduleParserError(
+            "Unsupported configured schedule.effective_interval: {0}".format(effective_interval)
+        )
+
     path = Path(csv_path)
     if not path.exists():
         raise ScheduleParserError("Schedule CSV not found: {0}".format(path))
@@ -93,7 +99,7 @@ def parse_schedule_csv(
         sc_raw = _safe_text(row.get("S/C"))
         mission_id = normalize_mission_name(sc_raw)
 
-        if mission_id not in MISSION_CANONICAL_NAMES:
+        if mission_id not in SUPPORTED_MISSION_IDS:
             skipped_unsupported_mission += 1
             continue
 

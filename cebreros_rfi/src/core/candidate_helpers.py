@@ -15,10 +15,11 @@ from typing import Dict, List, Sequence, Tuple
 import numpy as np
 from skyfield.api import load
 
+from cebreros_rfi.src.config_loader import get_supported_bands
 from cebreros_rfi.src.core.geometry_utils import angular_separation_deg
 
 
-SUPPORTED_CEBREROS_BANDS = frozenset(("X", "KA"))
+SUPPORTED_CEBREROS_BANDS = frozenset(get_supported_bands())
 
 
 def classify_band_match(candidate_bands: List[str], allowed_bands: set) -> str:

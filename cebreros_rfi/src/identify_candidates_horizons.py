@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Tuple
 
+from cebreros_rfi.src.config_loader import get_identification_config
 from cebreros_rfi.src.core.candidate_helpers import (
     candidate_sort_key,
     classify_band_match,
@@ -27,10 +28,6 @@ from cebreros_rfi.src.core.candidate_helpers import (
     preselect_geometric_candidates,
 )
 from cebreros_rfi.src.core.operational_context import (
-    DEFAULT_STEP_SIZE,
-    FINAL_SEP_DEG,
-    MAX_REASONABLE_RANGE_KM,
-    PRESELECTION_SEP_DEG,
     build_operational_context,
 )
 from cebreros_rfi.src.mission_names import normalize_mission_name
@@ -38,9 +35,6 @@ from cebreros_rfi.src.satnogs_band_lookup import lookup_bands_by_norad
 
 
 UTC = timezone.utc
-TOP_N_KNOWN_OUTPUT = 10
-TOP_N_UNKNOWN_OUTPUT = 10
-MAX_RF_LOOKUPS = 120
 
 
 @dataclass
@@ -89,6 +83,10 @@ class ScriptError(RuntimeError):
     pass
 
 
+def get_runtime_config():
+    return get_identification_config()
+
+
 def parse_console_datetime(prompt_text: str) -> str:
     raw_value = input(prompt_text).strip()
     dt = datetime.strptime(raw_value, "%Y-%m-%d %H:%M:%S").replace(tzinfo=UTC)
@@ -104,13 +102,14 @@ def prompt_inputs():
 
 
 def preselect_candidates(target_track_df, satellites, station) -> List[CandidatePreselection]:
+    config = get_runtime_config()
     raw_results = preselect_geometric_candidates(
         target_track_df=target_track_df,
         satellites=satellites,
         station=station,
-        preselection_sep_deg=PRESELECTION_SEP_DEG,
-        final_sep_deg=FINAL_SEP_DEG,
-        max_reasonable_range_km=MAX_REASONABLE_RANGE_KM,
+        preselection_sep_deg=float(config["preselection_sep_deg"]),
+        final_sep_deg=float(config["final_sep_deg"]),
+        max_reasonable_range_km=float(config["max_reasonable_range_km"]),
     )
 
     return [
@@ -183,13 +182,18 @@ def build_rankings(
     preselected_results: List[CandidatePreselection],
     allowed_bands: set,
 ) -> Tuple[List[CandidateResult], List[CandidateResult], List[CandidateResult], int]:
+    config = get_runtime_config()
+    max_rf_lookups = int(config["max_rf_lookups"])
+    top_n_known_output = int(config["top_n_known_output"])
+    top_n_unknown_output = int(config["top_n_unknown_output"])
+
     all_results = []
     known_results = []
     unknown_results = []
     lookups_done = 0
 
     for item in preselected_results:
-        if lookups_done >= MAX_RF_LOOKUPS:
+        if lookups_done >= max_rf_lookups:
             break
 
         candidate = enrich_single_candidate(item, allowed_bands)
@@ -202,8 +206,8 @@ def build_rankings(
             unknown_results.append(candidate)
 
         if (
-            len(known_results) >= TOP_N_KNOWN_OUTPUT
-            and len(unknown_results) >= TOP_N_UNKNOWN_OUTPUT
+            len(known_results) >= top_n_known_output
+            and len(unknown_results) >= top_n_unknown_output
         ):
             break
 
@@ -247,6 +251,7 @@ def print_result_block(title: str, results: List[CandidateResult], limit: int):
 
 
 def main():
+    config = get_runtime_config()
     station_id, mission_id, start_utc, end_utc = prompt_inputs()
 
     try:
@@ -255,7 +260,7 @@ def main():
             mission_id=mission_id,
             start_utc=start_utc,
             end_utc=end_utc,
-            step_size=DEFAULT_STEP_SIZE,
+            step_size=str(config["step_size"]),
         )
     except Exception as exc:
         raise ScriptError(str(exc))
@@ -285,9 +290,13 @@ def main():
         allowed_bands=allowed_bands,
     )
 
-    print_result_block("Known-frequency candidates", known_results, TOP_N_KNOWN_OUTPUT)
-    print_result_block("Unknown-frequency candidates", unknown_results, TOP_N_UNKNOWN_OUTPUT)
-    print_result_block("All checked candidates", all_results, max(TOP_N_KNOWN_OUTPUT, TOP_N_UNKNOWN_OUTPUT))
+    print_result_block("Known-frequency candidates", known_results, int(config["top_n_known_output"]))
+    print_result_block("Unknown-frequency candidates", unknown_results, int(config["top_n_unknown_output"]))
+    print_result_block(
+        "All checked candidates",
+        all_results,
+        max(int(config["top_n_known_output"]), int(config["top_n_unknown_output"])),
+    )
 
     output_dir = Path("results_horizons_identification")
     output_dir.mkdir(parents=True, exist_ok=True)

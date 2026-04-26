@@ -15,6 +15,7 @@ Unknown-frequency candidates:
 
 from typing import Dict, List
 
+from cebreros_rfi.src.config_loader import get_identification_config
 from cebreros_rfi.src.core.candidate_helpers import (
     candidate_sort_key,
     classify_band_match,
@@ -23,22 +24,17 @@ from cebreros_rfi.src.core.candidate_helpers import (
     preselect_geometric_candidates,
 )
 from cebreros_rfi.src.core.operational_context import (
-    DEFAULT_STEP_SIZE,
-    FINAL_SEP_DEG,
-    MAX_REASONABLE_RANGE_KM,
-    PRESELECTION_SEP_DEG,
     build_operational_context,
 )
 from cebreros_rfi.src.satnogs_band_lookup import lookup_bands_by_norad
 
 
-TOP_N_KNOWN_OUTPUT = 10
-TOP_N_UNKNOWN_OUTPUT = 10
-MAX_RF_LOOKUPS = 120
-
-
 class IdentificationServiceError(RuntimeError):
     pass
+
+
+def get_runtime_config() -> Dict:
+    return get_identification_config()
 
 
 def enrich_candidate(item: dict, allowed_bands: set) -> dict:
@@ -71,13 +67,18 @@ def enrich_candidate(item: dict, allowed_bands: set) -> dict:
 
 
 def build_rankings(preselected_results: List[dict], allowed_bands: set):
+    config = get_runtime_config()
+    max_rf_lookups = int(config["max_rf_lookups"])
+    top_n_known_output = int(config["top_n_known_output"])
+    top_n_unknown_output = int(config["top_n_unknown_output"])
+
     all_results = []
     known_results = []
     unknown_results = []
     lookups_done = 0
 
     for item in preselected_results:
-        if lookups_done >= MAX_RF_LOOKUPS:
+        if lookups_done >= max_rf_lookups:
             break
 
         candidate = enrich_candidate(item, allowed_bands)
@@ -89,8 +90,8 @@ def build_rankings(preselected_results: List[dict], allowed_bands: set):
         else:
             unknown_results.append(candidate)
 
-        enough_known = len(known_results) >= TOP_N_KNOWN_OUTPUT
-        enough_unknown = len(unknown_results) >= TOP_N_UNKNOWN_OUTPUT
+        enough_known = len(known_results) >= top_n_known_output
+        enough_unknown = len(unknown_results) >= top_n_unknown_output
         if enough_known and enough_unknown:
             break
 
@@ -108,13 +109,15 @@ def run_identification(
     start_utc: str,
     end_utc: str,
 ) -> Dict:
+    config = get_runtime_config()
+
     try:
         context = build_operational_context(
             station_id=station_id,
             mission_id=mission_id,
             start_utc=start_utc,
             end_utc=end_utc,
-            step_size=DEFAULT_STEP_SIZE,
+            step_size=str(config["step_size"]),
         )
     except Exception as exc:
         raise IdentificationServiceError(str(exc))
@@ -123,9 +126,9 @@ def run_identification(
         target_track_df=context.target_track_df,
         satellites=context.satellites,
         station=context.station,
-        preselection_sep_deg=PRESELECTION_SEP_DEG,
-        final_sep_deg=FINAL_SEP_DEG,
-        max_reasonable_range_km=MAX_REASONABLE_RANGE_KM,
+        preselection_sep_deg=float(config["preselection_sep_deg"]),
+        final_sep_deg=float(config["final_sep_deg"]),
+        max_reasonable_range_km=float(config["max_reasonable_range_km"]),
     )
 
     all_results, known_results, unknown_results, lookups_done = build_rankings(

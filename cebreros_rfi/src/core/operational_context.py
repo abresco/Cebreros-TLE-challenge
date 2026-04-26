@@ -15,6 +15,12 @@ from typing import Any, Dict, Set
 
 from skyfield.api import load
 
+from cebreros_rfi.src.config_loader import (
+    ConfigError,
+    get_station_allowed_bands,
+    get_station_ids,
+    get_station_skyfield_config,
+)
 from cebreros_rfi.src.core.geometry_utils import build_station
 from cebreros_rfi.src.horizons_target_track import (
     fetch_target_track,
@@ -26,12 +32,6 @@ from cebreros_rfi.src.local_candidate_catalog import (
 )
 from cebreros_rfi.src.mission_names import normalize_mission_name
 from cebreros_rfi.src.update_candidate_catalog import ensure_local_catalog_is_fresh
-
-
-DEFAULT_STEP_SIZE = "60s"
-PRESELECTION_SEP_DEG = 10.0
-FINAL_SEP_DEG = 5.0
-MAX_REASONABLE_RANGE_KM = 100000.0
 
 
 class OperationalContextError(RuntimeError):
@@ -58,39 +58,29 @@ class OperationalContext:
     station: Any
 
 
-STATION_CONFIGS = {
-    "CEB": StationConfig(
-        lat_deg=40.4526889,
-        lon_deg=-4.36755,
-        elevation_m=794.0,
-        allowed_bands={"X", "KA"},
-    ),
-    "MLG": StationConfig(
-        lat_deg=-35.7760083,
-        lon_deg=-69.3981972,
-        elevation_m=1550.0,
-        allowed_bands={"X", "KA"},
-    ),
-    "NNO": StationConfig(
-        lat_deg=-31.03,
-        lon_deg=116.11,
-        elevation_m=252.0,
-        allowed_bands={"X", "KA"},
-    ),
-}
-
-SUPPORTED_STATION_IDS = tuple(sorted(STATION_CONFIGS.keys()))
-
-
 def get_station_config(station_id: str) -> StationConfig:
     station_key = normalize_station_id(station_id)
-    if station_key not in STATION_CONFIGS:
-        raise OperationalContextError("Unsupported station ID: {0}".format(station_id))
-    return STATION_CONFIGS[station_key]
+    try:
+        skyfield_cfg = get_station_skyfield_config(station_key)
+        allowed_bands = {
+            str(item).upper() for item in get_station_allowed_bands(station_key)
+        }
+    except ConfigError as exc:
+        raise OperationalContextError(str(exc)) from exc
+
+    return StationConfig(
+        lat_deg=float(skyfield_cfg["lat_deg"]),
+        lon_deg=float(skyfield_cfg["lon_deg"]),
+        elevation_m=float(skyfield_cfg["elevation_m"]),
+        allowed_bands=allowed_bands,
+    )
 
 
 def get_supported_station_ids():
-    return SUPPORTED_STATION_IDS
+    try:
+        return tuple(get_station_ids())
+    except ConfigError as exc:
+        raise OperationalContextError(str(exc)) from exc
 
 
 def build_operational_context(
@@ -98,7 +88,7 @@ def build_operational_context(
     mission_id: str,
     start_utc: str,
     end_utc: str,
-    step_size: str = DEFAULT_STEP_SIZE,
+    step_size: str,
 ) -> OperationalContext:
     """
     Load the shared runtime context needed by identification/prediction flows.
