@@ -4,7 +4,7 @@
 # Copyright (c) 2026
 
 """
-Fetch target mission AZ/EL track from JPL Horizons for a given station and time slot.
+Fetch target mission AZ/EL track from JPL Horizons.
 """
 
 import re
@@ -21,12 +21,25 @@ from cebreros_rfi.src.config_loader import (
     get_station_horizons_config,
     normalize_station_id as normalize_station_id_from_config,
 )
-from cebreros_rfi.src.mission_names import normalize_mission_name
+from cebreros_rfi.src.input_validation import (
+    InputValidationError,
+    validate_mission_id,
+    validate_station_id,
+    validate_time_interval,
+)
 
 HORIZONS_API_URL = "https://ssd.jpl.nasa.gov/api/horizons.api"
 UTC_DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 
+# Description:
+#   Store a ground station definition ready for Horizons query building.
+# input:-
+#   Dataclass constructor fields for station ID, mode, coordinates, or center name.
+# output:-
+#   None.
+# return:-
+#   GroundStation instance.
 @dataclass(frozen=True)
 class GroundStation:
     station_id: str
@@ -37,16 +50,44 @@ class GroundStation:
     center_name: Optional[str] = None
 
 
+# Description:
+#   Error raised for validation, request, or parsing failures around Horizons.
+# input:-
+#   Same constructor input as RuntimeError.
+# output:-
+#   None.
+# return:-
+#   Exception instance.
 class HorizonsError(RuntimeError):
     pass
 
 
+# Description:
+#   Normalize a station ID through the config alias system.
+# input:-
+#   station_id: raw station ID.
+# output:-
+#   None.
+# return:-
+#   Canonical station ID when an alias exists.
 def normalize_station_id(station_id: str) -> str:
     return normalize_station_id_from_config(station_id)
 
 
+# Description:
+#   Build a Horizons-ready station object.
+# input:-
+#   station_id: raw or canonical station ID.
+# output:-
+#   None.
+# return:-
+#   GroundStation dataclass with geodetic or center-name configuration.
 def get_station(station_id: str) -> GroundStation:
-    station_key = normalize_station_id(station_id)
+    try:
+        station_key = validate_station_id(station_id)
+    except InputValidationError as exc:
+        raise HorizonsError(str(exc)) from exc
+
     try:
         cfg = get_station_horizons_config(station_key)
     except ConfigError as exc:
@@ -77,18 +118,48 @@ def get_station(station_id: str) -> GroundStation:
     raise HorizonsError("Unsupported Horizons mode for station {0}: {1}".format(station_key, mode))
 
 
+# Description:
+#   Resolve a mission ID to the Horizons COMMAND value.
+# input:-
+#   mission_id: raw mission ID or alias.
+# output:-
+#   None.
+# return:-
+#   Horizons COMMAND string.
 def get_mission_command(mission_id: str) -> str:
-    mission = normalize_mission_name(mission_id)
+    try:
+        mission = validate_mission_id(mission_id)
+    except InputValidationError as exc:
+        raise HorizonsError(str(exc)) from exc
+
     try:
         return get_horizons_mission_command(mission)
     except ConfigError as exc:
         raise HorizonsError(str(exc)) from exc
 
 
+# Description:
+#   Parse a canonical UTC timestamp for Horizons helper calculations.
+# input:-
+#   dt_str: timestamp formatted as YYYY-MM-DD HH:MM:SS.
+# output:-
+#   None.
+# return:-
+#   Timezone-aware UTC datetime.
 def parse_utc_datetime(dt_str: str) -> datetime:
     return datetime.strptime(dt_str, UTC_DATETIME_FORMAT).replace(tzinfo=timezone.utc)
 
 
+# Description:
+#   Convert configured sampling step to a Horizons-compatible STEP_SIZE.
+# input:-
+#   start_time_utc: interval start timestamp.
+#   stop_time_utc: interval end timestamp.
+#   step_size: configured step string such as 60s, 1m, or a count.
+# output:-
+#   None.
+# return:-
+#   STEP_SIZE value accepted by Horizons.
 def normalize_step_size_for_horizons(
     start_time_utc: str,
     stop_time_utc: str,
@@ -121,6 +192,18 @@ def normalize_step_size_for_horizons(
     )
 
 
+# Description:
+#   Build the complete Horizons observer API parameter dictionary.
+# input:-
+#   mission_command: Horizons COMMAND for the victim mission.
+#   station: GroundStation object.
+#   start_time_utc: interval start timestamp.
+#   stop_time_utc: interval end timestamp.
+#   step_size: configured sampling step.
+# output:-
+#   None.
+# return:-
+#   Dict of API query parameters.
 def build_horizons_params(
     mission_command: str,
     station: GroundStation,
@@ -171,6 +254,14 @@ def build_horizons_params(
     return params
 
 
+# Description:
+#   Query the JPL Horizons API.
+# input:-
+#   params: API query parameter dictionary.
+# output:-
+#   Performs an HTTP GET request.
+# return:-
+#   Raw Horizons result text from the JSON response.
 def query_horizons(params):
     response = requests.get(HORIZONS_API_URL, params=params, timeout=180)
     response.raise_for_status()
@@ -186,6 +277,14 @@ def query_horizons(params):
     return result
 
 
+# Description:
+#   Extract the ephemeris data block from a Horizons response.
+# input:-
+#   raw_result: raw Horizons result text.
+# output:-
+#   None.
+# return:-
+#   Text between $$SOE and $$EOE markers.
 def extract_soe_block(raw_result: str) -> str:
     match = re.search(r"\$\$SOE(.*?)\$\$EOE", raw_result, flags=re.DOTALL)
     if not match:
@@ -198,6 +297,14 @@ def extract_soe_block(raw_result: str) -> str:
     return block
 
 
+# Description:
+#   Parse Horizons CSV-like ephemeris rows into a DataFrame.
+# input:-
+#   csv_block: text block extracted between $$SOE and $$EOE.
+# output:-
+#   None.
+# return:-
+#   pandas DataFrame with UTC, AZ_target_deg, and EL_target_deg columns.
 def parse_horizons_csv_block(csv_block: str) -> pd.DataFrame:
     rows = []
 
@@ -234,6 +341,18 @@ def parse_horizons_csv_block(csv_block: str) -> pd.DataFrame:
     return df
 
 
+# Description:
+#   Fetch the victim mission target track from Horizons.
+# input:-
+#   mission_id: victim mission ID or alias.
+#   station_id: station ID or alias.
+#   start_time_utc: interval start timestamp.
+#   stop_time_utc: interval end timestamp.
+#   step_size: configured sampling step.
+# output:-
+#   Performs a Horizons API request.
+# return:-
+#   pandas DataFrame with UTC/AZ/EL target samples.
 def fetch_target_track(
     mission_id: str,
     station_id: str,
@@ -241,6 +360,11 @@ def fetch_target_track(
     stop_time_utc: str,
     step_size: str = "30s",
 ) -> pd.DataFrame:
+    try:
+        validate_time_interval(start_time_utc, stop_time_utc, "Start UTC", "End UTC")
+    except InputValidationError as exc:
+        raise HorizonsError(str(exc)) from exc
+
     station = get_station(station_id)
     mission_command = get_mission_command(mission_id)
 

@@ -5,9 +5,6 @@
 
 """
 Shared helpers for candidate preselection and ranking.
-
-These helpers keep the geometry and RF classification rules in one place so
-identification and prediction stay aligned.
 """
 
 from typing import Dict, List, Sequence, Tuple
@@ -22,10 +19,16 @@ from cebreros_rfi.src.core.geometry_utils import angular_separation_deg
 SUPPORTED_CEBREROS_BANDS = frozenset(get_supported_bands())
 
 
+# Description:
+#   Classify whether candidate RF bands match the selected station.
+# input:-
+#   candidate_bands: bands inferred from SatNOGS.
+#   allowed_bands: bands configured for the selected station.
+# output:-
+#   None.
+# return:-
+#   "MATCH", "MISMATCH", or "UNKNOWN".
 def classify_band_match(candidate_bands: List[str], allowed_bands: set) -> str:
-    """
-    Compare candidate RF bands against the station receive bands.
-    """
     normalized = {
         str(item).upper()
         for item in candidate_bands
@@ -41,10 +44,15 @@ def classify_band_match(candidate_bands: List[str], allowed_bands: set) -> str:
     return "MISMATCH"
 
 
+# Description:
+#   Convert RF band classification into a ranking penalty.
+# input:-
+#   band_match: classification from classify_band_match.
+# output:-
+#   None.
+# return:-
+#   Numeric penalty, where lower is better.
 def compute_band_penalty(band_match: str) -> float:
-    """
-    Lower values are better for ranking.
-    """
     if band_match == "MATCH":
         return 0.0
     if band_match == "UNKNOWN":
@@ -52,17 +60,27 @@ def compute_band_penalty(band_match: str) -> float:
     return 5.0
 
 
+# Description:
+#   Decide whether SatNOGS lookup produced usable RF context.
+# input:-
+#   lookup_status: SatNOGS lookup status string.
+# output:-
+#   None.
+# return:-
+#   True unless status is exactly "not_found".
 def has_known_frequency(lookup_status: str) -> bool:
-    """
-    Treat every lookup except an explicit "not_found" as known RF context.
-    """
     return str(lookup_status or "").strip().lower() != "not_found"
 
 
+# Description:
+#   Build the shared sorting key for geometry-first candidate lists.
+# input:-
+#   candidate: candidate dictionary with min separation, close samples, and time.
+# output:-
+#   None.
+# return:-
+#   Tuple used as a stable sort key.
 def candidate_sort_key(candidate: Dict) -> Tuple:
-    """
-    Shared tie-break order for geometry-first candidate lists.
-    """
     return (
         candidate["min_sep_deg"],
         -candidate["close_samples"],
@@ -70,15 +88,21 @@ def candidate_sort_key(candidate: Dict) -> Tuple:
     )
 
 
+# Description:
+#   Compute the possible RFI time slot from close-approach samples.
+# input:-
+#   close_indices: numpy indices inside the final angular threshold.
+#   timestamps: sequence of target-track timestamps.
+#   closest_idx: index of closest approach.
+# output:-
+#   None.
+# return:-
+#   Tuple with possible RFI start and end timestamps.
 def compute_possible_rfi_slot(
     close_indices: np.ndarray,
     timestamps: Sequence,
     closest_idx: int,
 ) -> Tuple[str, str]:
-    """
-    Return the full close-approach window or a single instant if there is only
-    one valid sample.
-    """
     if close_indices.size == 0:
         instant = timestamps[closest_idx].to_pydatetime().isoformat()
         return instant, instant
@@ -91,6 +115,20 @@ def compute_possible_rfi_slot(
     )
 
 
+# Description:
+#   Preselect candidates by station visibility and angular proximity.
+# input:-
+#   target_track_df: Horizons victim mission track.
+#   satellites: local catalog converted to Skyfield satellites.
+#   station: Skyfield observer station.
+#   preselection_sep_deg: broad angular filter threshold.
+#   final_sep_deg: close-sample threshold.
+#   max_reasonable_range_km: range sanity limit.
+#   include_possible_rfi_slot: whether to include RFI slot fields.
+# output:-
+#   None.
+# return:-
+#   List of geometry candidate dictionaries sorted by closeness.
 def preselect_geometric_candidates(
     target_track_df,
     satellites,
@@ -100,9 +138,6 @@ def preselect_geometric_candidates(
     max_reasonable_range_km: float,
     include_possible_rfi_slot: bool = False,
 ) -> List[dict]:
-    """
-    Run the shared geometry filter used by identification and prediction.
-    """
     ts = load.timescale()
 
     timestamps = list(target_track_df["UTC"])

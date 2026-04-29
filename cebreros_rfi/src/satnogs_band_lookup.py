@@ -22,7 +22,8 @@ import requests
 
 
 SATNOGS_API_TRANSMITTERS_URL = "https://db.satnogs.org/api/transmitters/"
-CACHE_PATH = Path("cebreros_rfi/data/cache/satnogs_band_cache.json")
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+CACHE_PATH = PROJECT_ROOT / "cebreros_rfi" / "data" / "cache" / "satnogs_band_cache.json"
 USER_AGENT = "CEB-RFI-Identifier/1.0"
 
 # Cebreros receive windows
@@ -30,14 +31,38 @@ CEB_X_RANGE_MHZ = (8400.0, 8500.0)
 CEB_KA_RANGE_MHZ = (31800.0, 32300.0)
 
 
+# Description:
+#   Error raised when the SatNOGS API returns an unexpected payload.
+# input:-
+#   Same constructor input as RuntimeError.
+# output:-
+#   None.
+# return:-
+#   Exception instance.
 class SatnogsLookupError(RuntimeError):
     pass
 
 
+# Description:
+#   Ensure the SatNOGS lookup cache directory exists.
+# input:-
+#   None.
+# output:-
+#   Creates the cache directory if it is missing.
+# return:-
+#   None.
 def ensure_cache_dir():
     CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 
+# Description:
+#   Load the local SatNOGS lookup cache.
+# input:-
+#   None.
+# output:-
+#   May create the cache directory.
+# return:-
+#   Dictionary keyed by NORAD catalog ID.
 def load_cache() -> Dict[str, dict]:
     ensure_cache_dir()
     if not CACHE_PATH.exists():
@@ -46,12 +71,28 @@ def load_cache() -> Dict[str, dict]:
         return json.load(handle)
 
 
+# Description:
+#   Save the local SatNOGS lookup cache.
+# input:-
+#   cache: dictionary keyed by NORAD catalog ID.
+# output:-
+#   Writes the cache JSON file.
+# return:-
+#   None.
 def save_cache(cache: Dict[str, dict]):
     ensure_cache_dir()
     with CACHE_PATH.open("w", encoding="utf-8") as handle:
         json.dump(cache, handle, indent=2, sort_keys=True)
 
 
+# Description:
+#   Remove one NORAD entry from the SatNOGS cache.
+# input:-
+#   norad_cat_id: NORAD catalog ID to remove.
+# output:-
+#   Updates the cache file when the entry exists.
+# return:-
+#   None.
 def clear_cache_for_norad(norad_cat_id: str):
     norad = str(norad_cat_id or "").strip()
     if not norad:
@@ -62,6 +103,15 @@ def clear_cache_for_norad(norad_cat_id: str):
         save_cache(cache)
 
 
+# Description:
+#   Perform one JSON GET request.
+# input:-
+#   url: API endpoint URL.
+#   params: optional query parameters.
+# output:-
+#   Sends an HTTP request.
+# return:-
+#   Parsed JSON payload.
 def api_get_json(url: str, params: Optional[dict] = None):
     response = requests.get(
         url,
@@ -73,10 +123,15 @@ def api_get_json(url: str, params: Optional[dict] = None):
     return response.json()
 
 
+# Description:
+#   Normalize a SatNOGS frequency value to MHz.
+# input:-
+#   raw_value: frequency value, usually in Hz.
+# output:-
+#   None.
+# return:-
+#   Frequency in MHz, or None when the value is missing/invalid.
 def normalize_freq_to_mhz(raw_value) -> Optional[float]:
-    """
-    SatNOGS usually returns Hz, but keep already-MHz values untouched.
-    """
     if raw_value in (None, "", 0):
         return None
 
@@ -91,6 +146,14 @@ def normalize_freq_to_mhz(raw_value) -> Optional[float]:
     return numeric
 
 
+# Description:
+#   Fetch SatNOGS transmitter rows for one NORAD catalog ID.
+# input:-
+#   norad_cat_id: NORAD catalog ID.
+# output:-
+#   Calls the SatNOGS transmitters API.
+# return:-
+#   List of transmitter dictionaries matching the NORAD ID.
 def fetch_transmitters_by_norad(norad_cat_id: str) -> List[dict]:
     norad = str(norad_cat_id).strip()
 
@@ -118,6 +181,14 @@ def fetch_transmitters_by_norad(norad_cat_id: str) -> List[dict]:
     return filtered
 
 
+# Description:
+#   Extract downlink frequency values from SatNOGS transmitter rows.
+# input:-
+#   transmitters: list of SatNOGS transmitter dictionaries.
+# output:-
+#   None.
+# return:-
+#   Sorted unique list of downlink frequencies in MHz.
 def extract_frequency_values_mhz(transmitters: List[dict]) -> List[float]:
     freqs_mhz = []
 
@@ -130,6 +201,14 @@ def extract_frequency_values_mhz(transmitters: List[dict]) -> List[float]:
     return sorted(set(freqs_mhz))
 
 
+# Description:
+#   Infer the Cebreros RF band for a single frequency.
+# input:-
+#   freq_mhz: frequency in MHz.
+# output:-
+#   None.
+# return:-
+#   "X", "KA", or "OUT_OF_CEB_RANGE".
 def infer_band_from_frequency_mhz(freq_mhz: float) -> str:
     if CEB_X_RANGE_MHZ[0] <= freq_mhz <= CEB_X_RANGE_MHZ[1]:
         return "X"
@@ -138,6 +217,14 @@ def infer_band_from_frequency_mhz(freq_mhz: float) -> str:
     return "OUT_OF_CEB_RANGE"
 
 
+# Description:
+#   Infer all unique bands represented by a list of frequencies.
+# input:-
+#   freqs_mhz: list of frequencies in MHz.
+# output:-
+#   None.
+# return:-
+#   Ordered list of band labels, or ["UNKNOWN"] when empty.
 def infer_bands_from_frequencies(freqs_mhz: List[float]) -> List[str]:
     bands = []
     for freq in freqs_mhz:
@@ -147,6 +234,14 @@ def infer_bands_from_frequencies(freqs_mhz: List[float]) -> List[str]:
     return bands if bands else ["UNKNOWN"]
 
 
+# Description:
+#   Keep only frequencies inside the Cebreros X/Ka receive windows.
+# input:-
+#   freqs_mhz: list of frequencies in MHz.
+# output:-
+#   None.
+# return:-
+#   Sorted unique list of relevant Cebreros frequencies.
 def filter_ceb_relevant_frequencies(freqs_mhz: List[float]) -> List[float]:
     relevant = []
     for freq in freqs_mhz:
@@ -157,10 +252,16 @@ def filter_ceb_relevant_frequencies(freqs_mhz: List[float]) -> List[float]:
     return sorted(set(relevant))
 
 
+# Description:
+#   Return SatNOGS RF metadata for one NORAD catalog ID.
+# input:-
+#   norad_cat_id: NORAD catalog ID.
+#   force_refresh: when True, ignore any cached entry.
+# output:-
+#   May read/write cache and call SatNOGS API.
+# return:-
+#   Dict with frequencies, inferred bands, URL, and lookup status.
 def lookup_bands_by_norad(norad_cat_id: str, force_refresh: bool = False) -> dict:
-    """
-    Return cached SatNOGS RF metadata for one NORAD catalog id.
-    """
     norad = str(norad_cat_id or "").strip()
     if not norad:
         return {

@@ -5,9 +5,6 @@
 
 """
 Shared operational configuration and runtime loading helpers.
-
-This keeps station setup and catalog/track loading consistent across the GUI
-services and the CLI entrypoints.
 """
 
 from dataclasses import dataclass
@@ -34,10 +31,26 @@ from cebreros_rfi.src.mission_names import normalize_mission_name
 from cebreros_rfi.src.update_candidate_catalog import ensure_local_catalog_is_fresh
 
 
+# Description:
+#   Error raised when shared runtime resources cannot be prepared.
+# input:-
+#   Same constructor input as RuntimeError.
+# output:-
+#   None.
+# return:-
+#   Exception instance.
 class OperationalContextError(RuntimeError):
     pass
 
 
+# Description:
+#   Store Skyfield coordinates and RF bands for one station.
+# input:-
+#   Dataclass constructor fields.
+# output:-
+#   None.
+# return:-
+#   StationConfig instance.
 @dataclass(frozen=True)
 class StationConfig:
     lat_deg: float
@@ -46,6 +59,14 @@ class StationConfig:
     allowed_bands: Set[str]
 
 
+# Description:
+#   Store all shared inputs needed by Identification or Prediction.
+# input:-
+#   Dataclass constructor fields.
+# output:-
+#   None.
+# return:-
+#   OperationalContext instance.
 @dataclass
 class OperationalContext:
     station_id: str
@@ -58,6 +79,14 @@ class OperationalContext:
     station: Any
 
 
+# Description:
+#   Load station coordinates and RF band configuration.
+# input:-
+#   station_id: station ID or alias.
+# output:-
+#   None.
+# return:-
+#   StationConfig dataclass.
 def get_station_config(station_id: str) -> StationConfig:
     station_key = normalize_station_id(station_id)
     try:
@@ -76,6 +105,14 @@ def get_station_config(station_id: str) -> StationConfig:
     )
 
 
+# Description:
+#   Return station IDs supported by the operational workflow.
+# input:-
+#   None.
+# output:-
+#   None.
+# return:-
+#   Tuple of canonical station IDs.
 def get_supported_station_ids():
     try:
         return tuple(get_station_ids())
@@ -83,6 +120,18 @@ def get_supported_station_ids():
         raise OperationalContextError(str(exc)) from exc
 
 
+# Description:
+#   Build all shared runtime inputs for Identification or Prediction.
+# input:-
+#   station_id: station ID or alias.
+#   mission_id: mission ID or alias.
+#   start_utc: interval start timestamp.
+#   end_utc: interval end timestamp.
+#   step_size: Horizons sampling step.
+# output:-
+#   May refresh/load catalog cache and query Horizons.
+# return:-
+#   OperationalContext dataclass.
 def build_operational_context(
     station_id: str,
     mission_id: str,
@@ -90,9 +139,6 @@ def build_operational_context(
     end_utc: str,
     step_size: str,
 ) -> OperationalContext:
-    """
-    Load the shared runtime context needed by identification/prediction flows.
-    """
     normalized_station_id = normalize_station_id(station_id)
     normalized_mission_id = normalize_mission_name(mission_id)
 

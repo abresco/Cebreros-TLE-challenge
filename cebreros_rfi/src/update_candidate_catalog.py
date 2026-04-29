@@ -5,14 +5,6 @@
 
 """
 Refresh the local ACTIVE candidate catalog from CelesTrak when possible.
-
-Operational behavior:
-- If a fresh local catalog already exists, use it and return metadata.
-- If the local catalog is old or missing, try to refresh it from CelesTrak.
-- If refresh fails but a local catalog exists, keep using the local catalog.
-- If refresh fails and no local catalog exists, raise an error.
-
-This module is reusable from the GUI / services, not only as a CLI script.
 """
 
 import json
@@ -26,16 +18,22 @@ from cebreros_rfi.src.config_loader import get_catalog_refresh_max_age_seconds
 
 
 CELESTRAK_GP_URL = "https://celestrak.org/NORAD/elements/gp.php"
-CATALOG_OUTPUT_PATH = Path("cebreros_rfi/data/cache/full_active_catalog.json")
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+CATALOG_OUTPUT_PATH = PROJECT_ROOT / "cebreros_rfi" / "data" / "cache" / "full_active_catalog.json"
 USER_AGENT = "CEB-RFI-Identifier/1.0"
 
 DEFAULT_MAX_AGE_SECONDS = get_catalog_refresh_max_age_seconds()
 
 
+# Description:
+#   Download one CelesTrak GP group in JSON format.
+# input:-
+#   group_name: CelesTrak group name, normally ACTIVE.
+# output:-
+#   Performs an HTTP GET request.
+# return:-
+#   List of catalog row dictionaries.
 def fetch_celestrak_group(group_name):
-    """
-    Download one CelesTrak group in JSON format.
-    """
     url = "{0}?GROUP={1}&FORMAT=JSON".format(
         CELESTRAK_GP_URL,
         str(group_name).strip().upper(),
@@ -55,10 +53,15 @@ def fetch_celestrak_group(group_name):
     return data
 
 
+# Description:
+#   Load an existing local catalog payload.
+# input:-
+#   catalog_path: optional catalog path override.
+# output:-
+#   Reads local JSON when present.
+# return:-
+#   Catalog payload dictionary, or None when file does not exist.
 def load_existing_payload(catalog_path=None):
-    """
-    Read the cached payload if it exists.
-    """
     catalog_path = Path(catalog_path or CATALOG_OUTPUT_PATH)
 
     if not catalog_path.exists():
@@ -68,10 +71,16 @@ def load_existing_payload(catalog_path=None):
         return json.load(handle)
 
 
+# Description:
+#   Save fetched catalog rows to the local cache.
+# input:-
+#   rows: list of CelesTrak catalog rows.
+#   catalog_path: optional catalog path override.
+# output:-
+#   Writes local JSON payload.
+# return:-
+#   Payload dictionary that was written.
 def save_payload(rows, catalog_path=None):
-    """
-    Persist the fetched catalog in the local cache location.
-    """
     catalog_path = Path(catalog_path or CATALOG_OUTPUT_PATH)
     catalog_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -89,10 +98,16 @@ def save_payload(rows, catalog_path=None):
     return payload
 
 
+# Description:
+#   Check whether a local file is fresh enough.
+# input:-
+#   path: file path to inspect.
+#   max_age_seconds: maximum accepted age.
+# output:-
+#   None.
+# return:-
+#   True when file exists and is fresh, otherwise False.
 def is_fresh(path, max_age_seconds):
-    """
-    Use file modification time as a lightweight freshness signal.
-    """
     path = Path(path)
     if not path.exists():
         return False
@@ -100,21 +115,21 @@ def is_fresh(path, max_age_seconds):
     return age_seconds <= max_age_seconds
 
 
+# Description:
+#   Ensure the local CelesTrak ACTIVE catalog can be used.
+# input:-
+#   catalog_path: optional catalog path override.
+#   max_age_seconds: freshness threshold.
+#   group_name: CelesTrak group name.
+# output:-
+#   May read/write local cache and call CelesTrak.
+# return:-
+#   Status dictionary describing fresh, refreshed, or fallback catalog usage.
 def ensure_local_catalog_is_fresh(
     catalog_path=None,
     max_age_seconds=DEFAULT_MAX_AGE_SECONDS,
     group_name="ACTIVE",
 ):
-    """
-    Reusable operational entrypoint.
-
-    Returns a dictionary with:
-    - status
-    - path
-    - count
-    - fetched_at_utc
-    - refreshed (bool)
-    """
     catalog_path = Path(catalog_path or CATALOG_OUTPUT_PATH)
     catalog_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -156,6 +171,14 @@ def ensure_local_catalog_is_fresh(
         )
 
 
+# Description:
+#   Run the catalog refresh helper from CLI.
+# input:-
+#   None.
+# output:-
+#   Prints catalog status to stdout.
+# return:-
+#   None.
 def main():
     result = ensure_local_catalog_is_fresh()
 

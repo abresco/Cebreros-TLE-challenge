@@ -137,5 +137,5 @@ gui:
   default_prediction_mission: JUICE
   default_identification_start_utc: "2025-07-25 04:56:00"
   default_identification_end_utc: "2025-07-25 04:58:00"
-  default_prediction_start_utc: "2026-01-05 10:00:00"
-  default_prediction_end_utc: "2026-01-05 10:20:00"
+  default_prediction_start_utc: "2026-06-05 10:00:00"
+  default_prediction_end_utc: "2026-06-05 10:20:00"

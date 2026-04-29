@@ -14,13 +14,30 @@ from pathlib import Path
 from skyfield.api import EarthSatellite
 
 
-LOCAL_CATALOG_PATH = Path("cebreros_rfi/data/cache/full_active_catalog.json")
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+LOCAL_CATALOG_PATH = PROJECT_ROOT / "cebreros_rfi" / "data" / "cache" / "full_active_catalog.json"
 
 
+# Description:
+#   Error raised when the cached CelesTrak catalog cannot be used.
+# input:-
+#   Same constructor input as RuntimeError.
+# output:-
+#   None.
+# return:-
+#   Exception instance.
 class LocalCatalogError(RuntimeError):
     pass
 
 
+# Description:
+#   Build metadata for a missing local catalog.
+# input:-
+#   catalog_path: expected catalog file path.
+# output:-
+#   None.
+# return:-
+#   Metadata dictionary with exists=False.
 def _build_missing_catalog_metadata(catalog_path: Path) -> dict:
     return {
         "exists": False,
@@ -31,6 +48,14 @@ def _build_missing_catalog_metadata(catalog_path: Path) -> dict:
     }
 
 
+# Description:
+#   Compute the age of a cached catalog payload.
+# input:-
+#   fetched_at_raw: ISO timestamp stored in the catalog payload.
+# output:-
+#   None.
+# return:-
+#   Age in hours, or None when unavailable.
 def _compute_age_hours(fetched_at_raw):
     if not fetched_at_raw:
         return None
@@ -44,10 +69,15 @@ def _compute_age_hours(fetched_at_raw):
     return (now_utc - fetched_at_dt).total_seconds() / 3600.0
 
 
+# Description:
+#   Read lightweight metadata for the local candidate catalog.
+# input:-
+#   catalog_path: optional catalog path override.
+# output:-
+#   Reads catalog JSON if present.
+# return:-
+#   Metadata dictionary with existence, count, fetch time, and age.
 def get_local_catalog_metadata(catalog_path=None):
-    """
-    Return lightweight metadata without constructing Skyfield objects.
-    """
     catalog_path = Path(catalog_path or LOCAL_CATALOG_PATH)
 
     if not catalog_path.exists():
@@ -67,10 +97,16 @@ def get_local_catalog_metadata(catalog_path=None):
     }
 
 
+# Description:
+#   Load the cached ACTIVE catalog as Skyfield satellites.
+# input:-
+#   ts: Skyfield timescale object.
+#   catalog_path: optional catalog path override.
+# output:-
+#   Reads local catalog JSON.
+# return:-
+#   List of tuples containing EarthSatellite, group labels, and raw row data.
 def load_local_candidate_catalog(ts, catalog_path=None):
-    """
-    Load the cached catalog and convert unique NORAD rows into Skyfield objects.
-    """
     catalog_path = Path(catalog_path or LOCAL_CATALOG_PATH)
 
     if not catalog_path.exists():

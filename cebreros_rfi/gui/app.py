@@ -5,6 +5,10 @@
 
 """
 Streamlit entrypoint for identification and prediction workflows.
+
+The UI file is intentionally thin: it collects user input, calls service-layer
+functions, and renders the returned dictionaries. Heavy validation, catalog
+loading, Horizons calls, and scoring live outside this module.
 """
 
 import sys
@@ -16,6 +20,8 @@ import streamlit as st
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
+    # Allow launching with: python -m streamlit run cebreros_rfi/gui/app.py
+    # from the project root without installing the package.
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from cebreros_rfi.gui.identification_service import (
@@ -35,6 +41,7 @@ from cebreros_rfi.src.feedback_db import (
 from cebreros_rfi.src.config_loader import get_gui_config, get_mission_ids
 from cebreros_rfi.src.core.operational_context import get_supported_station_ids
 
+# Ensure the feedback table exists before the user can save labels.
 init_db()
 
 st.set_page_config(
@@ -76,6 +83,8 @@ with st.expander("Help / Method"):
         - supports **CEB**, **MLG**, and **NNO**
         - treats **NNO3** as **NNO**
         - allows filtering and selecting jobs before batch execution
+
+        Manual UTC inputs must use **YYYY-MM-DD HH:MM:SS**.
         """
     )
 
@@ -92,6 +101,16 @@ LIST_LIKE_COLUMNS = [
 ]
 
 
+# Description:
+#   Find the index for a configured default inside Streamlit options.
+# input:-
+#   options: list of selectable values.
+#   configured_value: value read from YAML config.
+#   fallback_index: index used when configured_value is not present.
+# output:-
+#   None.
+# return:-
+#   Integer index safe to pass to st.selectbox.
 def get_selectbox_index(options, configured_value, fallback_index=0):
     try:
         return options.index(configured_value)
@@ -99,6 +118,14 @@ def get_selectbox_index(options, configured_value, fallback_index=0):
         return fallback_index
 
 
+# Description:
+#   Convert list-valued fields into compact display text.
+# input:-
+#   value: value from a result DataFrame cell.
+# output:-
+#   None.
+# return:-
+#   Comma-separated string for lists, otherwise original value.
 def format_list_like_value(value):
     if not isinstance(value, list):
         return value
@@ -114,10 +141,17 @@ def format_list_like_value(value):
     return ", ".join(formatted)
 
 
+# Description:
+#   Prepare service result DataFrames for Streamlit display.
+# input:-
+#   df: raw DataFrame built from service result dictionaries.
+# output:-
+#   None.
+# return:-
+#   Copy of DataFrame with list-like columns formatted as strings.
 def dataframe_for_display(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Convert list-heavy fields into compact strings for the Streamlit tables.
-    """
+    # Copy before formatting so cached service results in session_state are not
+    # mutated by display-specific transformations.
     df = df.copy()
 
     for column in LIST_LIKE_COLUMNS:
@@ -475,6 +509,12 @@ with tab_prediction:
 
                 st.success("Schedule parsed")
                 st.write("Summary:", schedule_info["summary"])
+                if schedule_info["summary"].get("row_errors"):
+                    st.warning(
+                        "Some schedule rows were skipped. First errors: {0}".format(
+                            "; ".join(schedule_info["summary"]["row_errors"])
+                        )
+                    )
 
                 jobs_df = pd.DataFrame(schedule_info["jobs"])
                 if jobs_df.empty:

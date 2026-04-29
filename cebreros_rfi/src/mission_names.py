@@ -36,25 +36,41 @@ MISSION_DIRECTORY_CANDIDATES = {
 }
 
 
+# Description:
+#   Normalize mission text to the canonical mission ID used by the app.
+# input:-
+#   value: raw mission text from user input, schedule rows, or folder names.
+# output:-
+#   None.
+# return:-
+#   Canonical mission ID when an alias is known, otherwise uppercased input.
 def normalize_mission_name(value):
-    """
-    Convert user input or folder names to the canonical mission name.
-    """
     mission = str(value or "").strip().upper()
     return MISSION_ALIASES.get(mission, mission)
 
 
+# Description:
+#   Build a compact text description of accepted mission names.
+# input:-
+#   None.
+# output:-
+#   None.
+# return:-
+#   Human-readable string listing canonical names and aliases.
 def accepted_mission_names_text():
-    """
-    Return the accepted mission names in a user-friendly format.
-    """
     return "HERA, JUICE/JUIC, SOLO, BEPI, MEX1/MEX, EUCL"
 
 
+# Description:
+#   Resolve a mission folder under a station data root.
+# input:-
+#   station_root: base directory containing mission folders.
+#   mission_value: raw mission name or alias.
+# output:-
+#   None.
+# return:-
+#   Tuple with canonical mission ID and the best matching mission path.
 def resolve_mission_dir(station_root, mission_value):
-    """
-    Find the first existing mission folder that matches the input name.
-    """
     station_root = Path(station_root)
     mission_input = str(mission_value or "").strip().upper()
     canonical = normalize_mission_name(mission_input)

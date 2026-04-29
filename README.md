@@ -31,6 +31,11 @@ The project currently supports:
 
 ## Installation
 
+Install and run this project as a normal user. Do not use a root shell for the
+Python environment or for launching the application. If your operating system
+needs extra system packages, use `sudo` only for that system package step, then
+return to your normal user account for the Python setup below.
+
 Clone the repository:
 
 ```bash
@@ -57,6 +62,12 @@ Install dependencies:
 pip install -r requirements.txt
 ```
 
+The virtual environment is intentionally created in project/user space:
+
+```bash
+python3 -m venv venv
+```
+
 ## Run the GUI
 
 From the project root:
@@ -81,8 +92,11 @@ Inputs:
 
 - Station ID
 - Mission ID
-- Start UTC
-- End UTC
+- Start UTC in `YYYY-MM-DD HH:MM:SS`
+- End UTC in `YYYY-MM-DD HH:MM:SS`
+
+Identification is intended for past intervals. The app validates datetime
+format, station, mission, and interval order before running Horizons queries.
 
 Outputs:
 
@@ -94,8 +108,11 @@ Outputs:
 Example:
 
 ```bash
-python -m cebreros_rfi.src.predict_candidates_horizons --station-id CEB --mission-id JUICE --start-utc "2026-01-05 10:00:00" --end-utc "2026-01-05 10:20:00"
+python -m cebreros_rfi.src.predict_candidates_horizons --station-id CEB --mission-id JUICE --start-utc "2026-06-05 10:00:00" --end-utc "2026-06-05 10:20:00"
 ```
+
+Manual Prediction is intended for future intervals. Schedule-based Prediction
+uses CSV planning files and keeps the configured BOT-EOT effective interval.
 
 Outputs:
 
@@ -142,3 +159,13 @@ RF metadata is shown as contextual information, but it does not directly increas
 - The current implementation supports **CEB**, **MLG**, and **NNO**
 - In schedule-based Prediction, NNO3 is treated as NNO
 - Schedule-based Prediction currently supports **CSV planning files**
+- Common input errors are validated and reported with concise messages instead
+  of Python tracebacks where possible
+
+## Troubleshooting
+
+- Run the app as a normal user:
+  `python -m streamlit run cebreros_rfi/gui/app.py`
+- Use `sudo` only for system-level package installation if your OS requires it.
+- If datetime validation fails, use exactly `YYYY-MM-DD HH:MM:SS` for manual
+  GUI and CLI inputs.

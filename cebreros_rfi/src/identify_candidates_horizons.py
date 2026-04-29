@@ -15,8 +15,9 @@ It does not import functionality from validation workflows.
 """
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
+import sys
 from typing import List, Tuple
 
 from cebreros_rfi.src.config_loader import get_identification_config
@@ -30,14 +31,26 @@ from cebreros_rfi.src.core.candidate_helpers import (
 from cebreros_rfi.src.core.operational_context import (
     build_operational_context,
 )
-from cebreros_rfi.src.mission_names import normalize_mission_name
+from cebreros_rfi.src.input_validation import (
+    InputValidationError,
+    format_user_datetime,
+    parse_user_datetime,
+    validate_identification_interval,
+    validate_mission_id,
+    validate_station_id,
+)
 from cebreros_rfi.src.satnogs_band_lookup import lookup_bands_by_norad
 
 
-UTC = timezone.utc
-
-
 @dataclass
+# Description:
+#   Store geometry-only candidate data for the Identification CLI.
+# input:-
+#   Dataclass constructor fields.
+# output:-
+#   None.
+# return:-
+#   CandidatePreselection instance.
 class CandidatePreselection:
     object_name: str
     norad_cat_id: str
@@ -54,6 +67,14 @@ class CandidatePreselection:
 
 
 @dataclass
+# Description:
+#   Store enriched Identification candidate data for the CLI.
+# input:-
+#   Dataclass constructor fields.
+# output:-
+#   None.
+# return:-
+#   CandidateResult instance.
 class CandidateResult:
     object_name: str
     norad_cat_id: str
@@ -79,28 +100,71 @@ class CandidateResult:
     manual_review_candidate: bool
 
 
+# Description:
+#   Error raised for user-facing Identification CLI failures.
+# input:-
+#   Same constructor input as RuntimeError.
+# output:-
+#   None.
+# return:-
+#   Exception instance.
 class ScriptError(RuntimeError):
     pass
 
 
+# Description:
+#   Load Identification runtime settings for the CLI workflow.
+# input:-
+#   None.
+# output:-
+#   None.
+# return:-
+#   Dict with Identification thresholds and output limits.
 def get_runtime_config():
     return get_identification_config()
 
 
+# Description:
+#   Prompt for and validate one UTC datetime value from the console.
+# input:-
+#   prompt_text: message shown to the user.
+# output:-
+#   Reads from stdin.
+# return:-
+#   Canonical timestamp string formatted as YYYY-MM-DD HH:MM:SS.
 def parse_console_datetime(prompt_text: str) -> str:
     raw_value = input(prompt_text).strip()
-    dt = datetime.strptime(raw_value, "%Y-%m-%d %H:%M:%S").replace(tzinfo=UTC)
-    return dt.strftime("%Y-%m-%d %H:%M:%S")
+    dt = parse_user_datetime(raw_value, prompt_text.split("(", 1)[0].strip() or "UTC datetime")
+    return format_user_datetime(dt)
 
 
+# Description:
+#   Prompt for all manual Identification CLI inputs.
+# input:-
+#   None.
+# output:-
+#   Reads station, mission, start, and end values from stdin.
+# return:-
+#   Tuple with validated station ID, mission ID, start UTC, and end UTC.
 def prompt_inputs():
-    station_id = input("Station ID: ").strip().upper()
-    mission_id = normalize_mission_name(input("Mission ID: ").strip())
+    station_id = validate_station_id(input("Station ID: ").strip())
+    mission_id = validate_mission_id(input("Mission ID: ").strip())
     start_utc = parse_console_datetime("Start UTC (YYYY-MM-DD HH:MM:SS): ")
     end_utc = parse_console_datetime("End UTC (YYYY-MM-DD HH:MM:SS): ")
+    validate_identification_interval(start_utc, end_utc)
     return station_id, mission_id, start_utc, end_utc
 
 
+# Description:
+#   Convert raw geometry preselection dictionaries to CLI dataclasses.
+# input:-
+#   target_track_df: Horizons target AZ/EL samples.
+#   satellites: Skyfield candidate satellites from local catalog.
+#   station: Skyfield observer station.
+# output:-
+#   None.
+# return:-
+#   List of CandidatePreselection objects sorted by geometry.
 def preselect_candidates(target_track_df, satellites, station) -> List[CandidatePreselection]:
     config = get_runtime_config()
     raw_results = preselect_geometric_candidates(
@@ -131,6 +195,15 @@ def preselect_candidates(target_track_df, satellites, station) -> List[Candidate
     ]
 
 
+# Description:
+#   Add SatNOGS metadata and ranking score to one CLI candidate.
+# input:-
+#   item: geometry-only CandidatePreselection object.
+#   allowed_bands: RF bands configured for the selected station.
+# output:-
+#   Reads SatNOGS cache/API.
+# return:-
+#   CandidateResult object with RF context and score.
 def enrich_single_candidate(
     item: CandidatePreselection,
     allowed_bands: set,
@@ -178,6 +251,15 @@ def enrich_single_candidate(
     )
 
 
+# Description:
+#   Build CLI result rankings split by known and unknown RF context.
+# input:-
+#   preselected_results: geometry candidates.
+#   allowed_bands: RF bands configured for the selected station.
+# output:-
+#   Performs up to the configured number of SatNOGS lookups.
+# return:-
+#   Tuple with all results, known results, unknown results, and lookup count.
 def build_rankings(
     preselected_results: List[CandidatePreselection],
     allowed_bands: set,
@@ -225,6 +307,16 @@ def build_rankings(
     return all_results, known_results, unknown_results, lookups_done
 
 
+# Description:
+#   Print one formatted result section to the console.
+# input:-
+#   title: section title.
+#   results: ranked candidates to display.
+#   limit: maximum number of rows to print.
+# output:-
+#   Writes formatted text to stdout.
+# return:-
+#   None.
 def print_result_block(title: str, results: List[CandidateResult], limit: int):
     print("\n----------------------------------")
     print(title)
@@ -250,9 +342,20 @@ def print_result_block(title: str, results: List[CandidateResult], limit: int):
         )
 
 
+# Description:
+#   Run the interactive Identification CLI workflow.
+# input:-
+#   None.
+# output:-
+#   Reads stdin, writes console output, and writes an HTML report.
+# return:-
+#   None.
 def main():
     config = get_runtime_config()
-    station_id, mission_id, start_utc, end_utc = prompt_inputs()
+    try:
+        station_id, mission_id, start_utc, end_utc = prompt_inputs()
+    except InputValidationError as exc:
+        raise ScriptError(str(exc)) from exc
 
     try:
         context = build_operational_context(
@@ -320,4 +423,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except ScriptError as exc:
+        print("Error: {0}".format(exc), file=sys.stderr)
+        sys.exit(2)

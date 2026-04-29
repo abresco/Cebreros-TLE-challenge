@@ -14,36 +14,59 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping, Optional, Union
 
 
-DB_PATH = Path("cebreros_rfi/data/db/rfi_feedback.sqlite3")
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DB_PATH = PROJECT_ROOT / "cebreros_rfi" / "data" / "db" / "rfi_feedback.sqlite3"
 DbPath = Optional[Union[str, Path]]
 CandidatePayload = Mapping[str, Any]
 HistoryStats = Dict[str, int]
 
 
+# Description:
+#   Resolve the SQLite feedback database path.
+# input:-
+#   db_path: optional override path for tests or custom use.
+# output:-
+#   None.
+# return:-
+#   Path to the feedback database.
 def resolve_db_path(db_path: DbPath = None) -> Path:
     return Path(db_path or DB_PATH)
 
 
+# Description:
+#   Ensure the feedback database parent directory exists.
+# input:-
+#   db_path: optional DB path override.
+# output:-
+#   Creates the parent directory if needed.
+# return:-
+#   None.
 def ensure_db_dir(db_path: DbPath = None):
-    """
-    Create the SQLite parent directory on demand.
-    """
     resolve_db_path(db_path).parent.mkdir(parents=True, exist_ok=True)
 
 
+# Description:
+#   Open a SQLite connection to the feedback database.
+# input:-
+#   db_path: optional DB path override.
+# output:-
+#   Creates the parent directory if needed.
+# return:-
+#   sqlite3 connection object.
 def get_connection(db_path: DbPath = None):
-    """
-    Open a connection to the feedback database, creating directories if needed.
-    """
     ensure_db_dir(db_path)
-    path = str(resolve_db_path(db_path))
-    return sqlite3.connect(path)
+    return sqlite3.connect(str(resolve_db_path(db_path)))
 
 
+# Description:
+#   Create the feedback table and indexes if they do not exist.
+# input:-
+#   db_path: optional DB path override.
+# output:-
+#   Creates/updates SQLite schema.
+# return:-
+#   None.
 def init_db(db_path: DbPath = None):
-    """
-    Ensure the feedback table and lookup indexes exist.
-    """
     with get_connection(db_path) as conn:
         conn.execute(
             """
@@ -88,6 +111,24 @@ def init_db(db_path: DbPath = None):
         )
 
 
+# Description:
+#   Store one operator feedback label for a candidate.
+# input:-
+#   station_id: station used for the pass.
+#   mission_id: victim mission ID.
+#   pass_start_utc: full pass start timestamp.
+#   pass_end_utc: full pass end timestamp.
+#   rfi_start_utc: RFI interval start timestamp.
+#   rfi_end_utc: RFI interval end timestamp.
+#   candidate: candidate result dictionary.
+#   user_label: confirmed, rejected, or uncertain.
+#   probability: optional Prediction probability.
+#   notes: optional operator notes.
+#   db_path: optional DB path override.
+# output:-
+#   Inserts one row into SQLite.
+# return:-
+#   None.
 def record_identification_feedback(
     station_id: str,
     mission_id: str,
@@ -149,6 +190,14 @@ def record_identification_feedback(
         )
 
 
+# Description:
+#   Build an empty normalized history-count dictionary.
+# input:-
+#   None.
+# output:-
+#   None.
+# return:-
+#   Dict with zero counts for all supported labels.
 def _empty_stats() -> HistoryStats:
     return {
         "confirmed": 0,
@@ -158,10 +207,15 @@ def _empty_stats() -> HistoryStats:
     }
 
 
+# Description:
+#   Convert grouped SQL label counts into normalized history stats.
+# input:-
+#   rows: SQL rows shaped as (label, count).
+# output:-
+#   None.
+# return:-
+#   Dict with confirmed, rejected, uncertain, and total counts.
 def _rows_to_counts(rows: Iterable) -> HistoryStats:
-    """
-    Convert grouped SQL rows into the normalized stats structure used elsewhere.
-    """
     counts = _empty_stats()
 
     for label, count in rows:
@@ -173,10 +227,16 @@ def _rows_to_counts(rows: Iterable) -> HistoryStats:
     return counts
 
 
+# Description:
+#   Read global feedback history for one candidate.
+# input:-
+#   norad_cat_id: candidate NORAD catalog ID.
+#   db_path: optional DB path override.
+# output:-
+#   Reads SQLite feedback DB.
+# return:-
+#   HistoryStats dictionary for all missions combined.
 def get_candidate_history_stats(norad_cat_id: str, db_path: DbPath = None) -> HistoryStats:
-    """
-    Global candidate history, regardless of victim mission.
-    """
     init_db(db_path)
 
     norad = str(norad_cat_id or "").strip()
@@ -197,15 +257,21 @@ def get_candidate_history_stats(norad_cat_id: str, db_path: DbPath = None) -> Hi
     return _rows_to_counts(rows)
 
 
+# Description:
+#   Read mission-specific feedback history for one candidate.
+# input:-
+#   mission_id: victim mission ID.
+#   norad_cat_id: candidate NORAD catalog ID.
+#   db_path: optional DB path override.
+# output:-
+#   Reads SQLite feedback DB.
+# return:-
+#   HistoryStats dictionary for this mission/candidate pair.
 def get_candidate_history_stats_for_mission(
     mission_id: str,
     norad_cat_id: str,
     db_path: DbPath = None,
 ) -> HistoryStats:
-    """
-    Mission-specific candidate history:
-    how often this NORAD interfered with this ESA victim mission.
-    """
     init_db(db_path)
 
     mission = str(mission_id or "").strip().upper()

@@ -19,22 +19,58 @@ DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config" / "app_config.yaml"
 _CONFIG_CACHE = None
 
 
+# Description:
+#   Error raised when app configuration is missing or invalid.
+# input:-
+#   Same constructor input as RuntimeError.
+# output:-
+#   None.
+# return:-
+#   Exception instance.
 class ConfigError(RuntimeError):
     pass
 
 
+# Description:
+#   Validate that a YAML value is a dictionary.
+# input:-
+#   value: YAML value to check.
+#   key_path: dotted config key path for error messages.
+# output:-
+#   None.
+# return:-
+#   The original value typed as a Dict.
 def _require_mapping(value: Any, key_path: str) -> Dict:
     if not isinstance(value, dict):
         raise ConfigError("Configuration key '{0}' must be a mapping.".format(key_path))
     return value
 
 
+# Description:
+#   Validate that a YAML value is a list.
+# input:-
+#   value: YAML value to check.
+#   key_path: dotted config key path for error messages.
+# output:-
+#   None.
+# return:-
+#   The original value typed as a List.
 def _require_list(value: Any, key_path: str) -> List:
     if not isinstance(value, list):
         raise ConfigError("Configuration key '{0}' must be a list.".format(key_path))
     return value
 
 
+# Description:
+#   Validate that a config mapping contains all required keys.
+# input:-
+#   mapping: config dictionary to inspect.
+#   key_path: dotted parent config key path for error messages.
+#   keys: required child keys.
+# output:-
+#   None.
+# return:-
+#   The original mapping.
 def _require_keys(mapping: Dict, key_path: str, keys: List[str]) -> Dict:
     for key in keys:
         if key not in mapping:
@@ -42,6 +78,14 @@ def _require_keys(mapping: Dict, key_path: str, keys: List[str]) -> Dict:
     return mapping
 
 
+# Description:
+#   Load the project YAML configuration.
+# input:-
+#   force_reload: when True, bypass the in-memory cache.
+# output:-
+#   Reads config/app_config.yaml when cache is empty or reload is requested.
+# return:-
+#   Parsed configuration dictionary.
 def load_app_config(force_reload: bool = False) -> Dict:
     global _CONFIG_CACHE
 
@@ -68,6 +112,14 @@ def load_app_config(force_reload: bool = False) -> Dict:
     return _CONFIG_CACHE
 
 
+# Description:
+#   Read configured station aliases.
+# input:-
+#   None.
+# output:-
+#   None.
+# return:-
+#   Dict mapping alternate station labels to canonical station IDs.
 def get_station_aliases() -> Dict[str, str]:
     config = load_app_config()
     stations_cfg = _require_mapping(config.get("stations", {}), "stations")
@@ -75,12 +127,28 @@ def get_station_aliases() -> Dict[str, str]:
     return _require_mapping(aliases, "stations.aliases")
 
 
+# Description:
+#   Normalize a station ID using configured aliases.
+# input:-
+#   station_id: raw station ID.
+# output:-
+#   None.
+# return:-
+#   Uppercase canonical station ID or original uppercase value.
 def normalize_station_id(station_id: str) -> str:
     raw = str(station_id or "").strip().upper()
     aliases = get_station_aliases()
     return str(aliases.get(raw, raw)).strip().upper()
 
 
+# Description:
+#   Read all canonical station IDs from config.
+# input:-
+#   None.
+# output:-
+#   None.
+# return:-
+#   Sorted list of configured station IDs.
 def get_station_ids() -> List[str]:
     config = load_app_config()
     stations_cfg = _require_mapping(config.get("stations", {}), "stations")
@@ -88,6 +156,14 @@ def get_station_ids() -> List[str]:
     return sorted(list(definitions.keys()))
 
 
+# Description:
+#   Read one station definition from config.
+# input:-
+#   station_id: canonical station ID or alias.
+# output:-
+#   None.
+# return:-
+#   Station configuration dictionary.
 def get_station_config(station_id: str) -> Dict:
     config = load_app_config()
     station_key = normalize_station_id(station_id)
@@ -100,6 +176,14 @@ def get_station_config(station_id: str) -> Dict:
     return _require_mapping(definitions[station_key], "stations.definitions.{0}".format(station_key))
 
 
+# Description:
+#   Read allowed RF bands for one station.
+# input:-
+#   station_id: canonical station ID or alias.
+# output:-
+#   None.
+# return:-
+#   List of configured allowed RF bands.
 def get_station_allowed_bands(station_id: str) -> List[str]:
     station_cfg = get_station_config(station_id)
     station_key = normalize_station_id(station_id)
@@ -115,6 +199,14 @@ def get_station_allowed_bands(station_id: str) -> List[str]:
     )
 
 
+# Description:
+#   Read Skyfield observer coordinates for one station.
+# input:-
+#   station_id: canonical station ID or alias.
+# output:-
+#   None.
+# return:-
+#   Dict with lat_deg, lon_deg, and elevation_m.
 def get_station_skyfield_config(station_id: str) -> Dict:
     station_key = normalize_station_id(station_id)
     station_cfg = get_station_config(station_id)
@@ -131,6 +223,14 @@ def get_station_skyfield_config(station_id: str) -> Dict:
     )
 
 
+# Description:
+#   Read Horizons observer configuration for one station.
+# input:-
+#   station_id: canonical station ID or alias.
+# output:-
+#   None.
+# return:-
+#   Dict describing either geodetic coordinates or Horizons center name.
 def get_station_horizons_config(station_id: str) -> Dict:
     station_key = normalize_station_id(station_id)
     station_cfg = get_station_config(station_id)
@@ -165,6 +265,14 @@ def get_station_horizons_config(station_id: str) -> Dict:
     )
 
 
+# Description:
+#   Build the set of all RF bands supported by configured stations.
+# input:-
+#   None.
+# output:-
+#   None.
+# return:-
+#   Sorted list of unique band labels.
 def get_supported_bands() -> List[str]:
     bands = set()
     for station_id in get_station_ids():
@@ -172,12 +280,28 @@ def get_supported_bands() -> List[str]:
     return sorted(bands)
 
 
+# Description:
+#   Read mission IDs supported by the app.
+# input:-
+#   None.
+# output:-
+#   None.
+# return:-
+#   List of canonical mission IDs.
 def get_mission_ids() -> List[str]:
     config = load_app_config()
     missions_cfg = _require_mapping(config.get("missions", {}), "missions")
     return list(_require_list(missions_cfg.get("supported_ids", []), "missions.supported_ids"))
 
 
+# Description:
+#   Read the JPL Horizons COMMAND for a mission.
+# input:-
+#   mission_id: mission ID or alias.
+# output:-
+#   None.
+# return:-
+#   Horizons COMMAND string.
 def get_horizons_mission_command(mission_id: str) -> str:
     config = load_app_config()
     mission_key = normalize_mission_name(mission_id)
@@ -190,6 +314,14 @@ def get_horizons_mission_command(mission_id: str) -> str:
     return str(commands[mission_key])
 
 
+# Description:
+#   Read Identification runtime settings.
+# input:-
+#   None.
+# output:-
+#   None.
+# return:-
+#   Dict with Identification sampling, thresholds, and limits.
 def get_identification_config() -> Dict:
     config = load_app_config()
     return dict(
@@ -209,6 +341,14 @@ def get_identification_config() -> Dict:
     )
 
 
+# Description:
+#   Read Prediction runtime settings.
+# input:-
+#   None.
+# output:-
+#   None.
+# return:-
+#   Dict with Prediction sampling, thresholds, limits, and scoring section.
 def get_prediction_config() -> Dict:
     config = load_app_config()
     return dict(
@@ -228,6 +368,14 @@ def get_prediction_config() -> Dict:
     )
 
 
+# Description:
+#   Read Prediction scoring settings.
+# input:-
+#   None.
+# output:-
+#   None.
+# return:-
+#   Dict with all heuristic probability scoring parameters.
 def get_prediction_scoring_config() -> Dict:
     return dict(
         _require_keys(
@@ -250,22 +398,54 @@ def get_prediction_scoring_config() -> Dict:
     )
 
 
+# Description:
+#   Read local catalog settings.
+# input:-
+#   None.
+# output:-
+#   None.
+# return:-
+#   Catalog configuration dictionary.
 def get_catalog_config() -> Dict:
     config = load_app_config()
     return dict(_require_mapping(config.get("catalog", {}), "catalog"))
 
 
+# Description:
+#   Read catalog refresh threshold in seconds.
+# input:-
+#   None.
+# output:-
+#   None.
+# return:-
+#   Integer max catalog age in seconds.
 def get_catalog_refresh_max_age_seconds() -> int:
     cfg = get_catalog_config()
     hours = float(cfg.get("refresh_max_age_hours", 2))
     return int(hours * 3600)
 
 
+# Description:
+#   Read schedule parsing settings.
+# input:-
+#   None.
+# output:-
+#   None.
+# return:-
+#   Schedule configuration dictionary.
 def get_schedule_config() -> Dict:
     config = load_app_config()
     return dict(_require_mapping(config.get("schedule", {}), "schedule"))
 
 
+# Description:
+#   Read the configured schedule effective interval mode.
+# input:-
+#   None.
+# output:-
+#   None.
+# return:-
+#   Uppercase interval mode string.
 def get_schedule_effective_interval() -> str:
     schedule_cfg = get_schedule_config()
     if "effective_interval" not in schedule_cfg:
@@ -273,6 +453,14 @@ def get_schedule_effective_interval() -> str:
     return str(schedule_cfg["effective_interval"]).strip().upper()
 
 
+# Description:
+#   Read GUI defaults from config.
+# input:-
+#   None.
+# output:-
+#   None.
+# return:-
+#   Dict with default station, missions, and datetime values.
 def get_gui_config() -> Dict:
     config = load_app_config()
     return dict(
